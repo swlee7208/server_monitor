@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>AlphaX Monitor</title>
+    <script src="/static/chart.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; }
+        nav { background:#343a40; padding:10px; display:flex; gap:20px; }
+        nav a { color:#fff; text-decoration:none; font-weight:bold; }
+        nav a:hover { text-decoration:underline; }
+        .container { padding:20px; }
+        .toolbar { display:flex; align-items:center; gap:12px; margin:6px 0 14px 0; flex-wrap:wrap; }
+        .toolbar label { font-size:12px; color:#333; }
+        .toolbar select { padding:2px 6px; }
+        .grid-container { display:grid; grid-template-columns:repeat(2,1fr); grid-gap:15px; }
+        .chart-box { background:#f8f9fa; padding:4px; border-radius:8px; text-align:center; }
+        .chart-box h4 { font-size:14px; margin:2px 0; }
+        canvas { max-width:100%; max-height:150px; }
+    </style>
+</head>
+<body>
+<nav>
+    <a href="/">Server Monitor</a>
+    <a href="/cuda">Alpha Cuda Simul</a>
+</nav>
+
+<div class="container">
+    <h4>Server Monitor</h4>
+
+    <div class="toolbar">
+        <label>
+            Refresh Sec:
+            <select id="refreshSec">
+                <option value="1">1</option>
+                <option value="2" selected>2</option>
+                <option value="5">5</option>
+                <option value="10">10</option>
+            </select>
+        </label>
+        <label>
+            Max Points:
+            <select id="maxPoints">
+                <option value="50">50</option>
+                <option value="100" selected>100</option>
+                <option value="200">200</option>
+                <option value="500">500</option>
+            </select>
+        </label>
+    </div>
+
+    <div class="grid-container">
+        <!-- 1행 -->
+        <div class="chart-box">
+            <h4>CPU Usage (%)</h4>
+            <canvas id="cpuChart"></canvas>
+        </div>
+        <div class="chart-box">
+            <h4>GPU Usage (%)</h4>
+            <canvas id="gpuChart"></canvas>
+        </div>
+        <!-- 2행 -->
+        <div class="chart-box">
+            <h4>System RAM Usage (GB)</h4>
+            <canvas id="ramChart"></canvas>
+        </div>
+        <div class="chart-box">
+            <h4>GPU Memory Usage (GB)</h4>
+            <canvas id="gpuMemChart"></canvas>
+        </div>
+        <!-- 3행 -->
+        <div class="chart-box">
+            <h4>CPU Temp (°C)</h4>
+            <canvas id="cpuTempChart"></canvas>
+        </div>
+        <div class="chart-box">
+            <h4>GPU Temp (°C)</h4>
+            <canvas id="gpuTempChart"></canvas>
+        </div>
+    </div>
+</div>
+
+<script>
+async function fetchData(){
+    const res = await fetch('/api/status');
+    return await res.json();
+}
+
+function createChart(ctx, label, color, yMin, yMax){
+    return new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label,
+                data: [],
+                borderColor: color,
+                fill: false,
+                borderWidth: 1,            // 선 굵기 (기본 3 → 얇게)
+                pointRadius: 1,            // 포인트 크기
+                pointHoverRadius: 3        // 마우스 오버 시 포인트 크기
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { display: false },
+                y: { min: yMin, max: yMax }
+            }
+        }
+    });
+}
+
+
+let refreshMs = 2000;
+let maxKeep   = 100;
+let timerId   = null;
+
+function trimChart(chart){
+    const ds = chart.data.datasets[0];
+    const n = ds.data.length;
+    if (n > maxKeep){
+        const start = n - maxKeep;
+        ds.data = ds.data.slice(start);
+        chart.data.labels = chart.data.labels.slice(start);
+        chart.update('none');
+    }
+}
+
+function pushData(chart, label, value){
+    chart.data.labels.push(label);
+    chart.data.datasets[0].data.push(value);
+    if (chart.data.labels.length > maxKeep){
+        chart.data.labels.shift();
+        chart.data.datasets[0].data.shift();
+    }
+    chart.update('none');
+}
+
+const cpuChart     = createChart(document.getElementById('cpuChart'), 'CPU %', 'blue',   0, 100);
+const gpuChart     = createChart(document.getElementById('gpuChart'), 'GPU %', 'green',  0, 100);
+const ramChart     = createChart(document.getElementById('ramChart'), 'RAM GB', 'purple', 0, 32);
+const gpuMemChart  = createChart(document.getElementById('gpuMemChart'), 'GPU Mem GB', 'brown', 0, 12);
+const cpuTempChart = createChart(document.getElementById('cpuTempChart'), 'CPU Temp °C', 'red',   20, 100);
+const gpuTempChart = createChart(document.getElementById('gpuTempChart'), 'GPU Temp °C', 'orange',20, 100);
+
+const allCharts = [cpuChart, gpuChart, ramChart, gpuMemChart, cpuTempChart, gpuTempChart];
+
+async function updateCharts(){
+    const data = await fetchData();
+    const time = new Date().toLocaleTimeString();
+
+    // RAM, GPU 메모리 → GB 단위 변환 (소수점 1자리)
+    const ramGB     = (data.ram_used / 1024).toFixed(1);
+    const gpuMemGB  = data.gpus.length > 0 ? (data.gpus[0].mem_used / 1024).toFixed(1) : 0;
+
+    pushData(cpuChart, time, data.cpu);
+    pushData(cpuTempChart, time, data.cpu_temp);
+
+    if (data.gpus.length > 0){
+        pushData(gpuChart, time, data.gpus[0].gpu_util);
+        pushData(gpuTempChart, time, data.gpus[0].gpu_temp);
+        pushData(gpuMemChart, time, parseFloat(gpuMemGB));
+    }
+    pushData(ramChart, time, parseFloat(ramGB));
+}
+
+function restartTimer(){
+    if (timerId) clearInterval(timerId);
+    timerId = setInterval(updateCharts, refreshMs);
+}
+
+const refreshSel = document.getElementById('refreshSec');
+const maxSel     = document.getElementById('maxPoints');
+
+refreshSel.addEventListener('change', () => {
+    refreshMs = parseInt(refreshSel.value, 10) * 1000;
+    restartTimer();
+    updateCharts();
+});
+
+maxSel.addEventListener('change', () => {
+    maxKeep = parseInt(maxSel.value, 10);
+    allCharts.forEach(trimChart);
+    updateCharts();
+});
+
+updateCharts();
+restartTimer();
+</script>
+</body>
+</html>
+
