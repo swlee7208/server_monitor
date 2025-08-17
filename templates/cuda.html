@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Alpha Cuda Simul</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; }
+    nav { background:#343a40; padding:10px; display:flex; gap:20px; }
+    nav a { color:#fff; text-decoration:none; font-weight:bold; }
+    nav a:hover { text-decoration:underline; }
+    .container { padding:20px; }
+    .toolbar { display:flex; align-items:center; gap:12px; margin:6px 0 14px 0; flex-wrap:wrap; }
+    .toolbar label { font-size:12px; color:#333; }
+    .toolbar input, .toolbar select, .toolbar button { padding:4px 6px; }
+
+    table { width:100%; border-collapse: collapse; }
+    th, td { border:1px solid #e1e1e1; padding:6px 8px; font-size:12px; }
+    th { background:#f5f6f7; text-align:left; }
+    tr:hover { background:#fafafa; }
+    tr.data-row { cursor: pointer; }
+    .right { text-align:right; }
+    .muted { color:#777; }
+  </style>
+</head>
+<body>
+
+<nav>
+  <a href="/">Server Monitor</a>
+  <a href="/cuda">Alpha Cuda Simul</a>
+  <a href="/simul">Simulation Regist</a>
+  <a href="/paramset">Parameta Set Regist</a>
+</nav>
+
+
+<div class="container">
+  <h4>Alpha Cuda Simul — Simulation List</h4>
+
+  <div class="toolbar">
+    <label>Max Rows:
+      <select id="limit">
+        <option value="50">50</option>
+        <option value="100" selected>100</option>
+        <option value="200">200</option>
+        <option value="500">500</option>
+        <option value="1000">1000</option>
+      </select>
+    </label>
+    <label>Filter (Name / Type / ID):
+      <input type="text" id="filter" placeholder="">
+    </label>
+    <button id="reloadBtn">Reload</button>
+    <span id="status" class="muted"></span>
+  </div>
+
+  <table id="simulTable">
+    <thead>
+      <tr>
+        <th>simul_id</th>
+        <th>simul_type</th>
+        <th>main_simul_id</th>
+        <th>simul_name</th>
+        <th>from_date</th>
+        <th>to_date</th>
+        <th class="right">case_cnt</th>
+        <th>end_time</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<script>
+async function loadSimulList(limit){
+  const res = await fetch('/api/simul_list?limit=' + limit);
+  if (!res.ok){ throw new Error(await res.text() || ('HTTP ' + res.status)); }
+  return await res.json();
+}
+
+function matchFilter(row, token){
+  if (!token) return true;
+  const t = token.toLowerCase();
+  return (
+    String(row.simul_id ?? '').toLowerCase().includes(t) ||
+    String(row.simul_type ?? '').toLowerCase().includes(t) ||
+    String(row.main_simul_id ?? '').toLowerCase().includes(t) ||
+    String(row.simul_name ?? '').toLowerCase().includes(t)
+  );
+}
+
+function renderTable(items, token){
+  const tbody = document.querySelector('#simulTable tbody');
+  tbody.innerHTML = '';
+
+  const filtered = items.filter(r => matchFilter(r, token));
+
+  for (const r of filtered){
+    const tr = document.createElement('tr');
+    tr.className = 'data-row';
+
+    // 행 클릭 → 상세 페이지 이동 (문자열 연결 사용)
+    tr.addEventListener('click', () => {
+      if (r.simul_id != null) {
+        window.location.href = '/cuda/' + r.simul_id;
+      }
+    });
+
+    // 첫 셀: 명시적 링크(백업)
+    const td_id = document.createElement('td');
+    const a = document.createElement('a');
+    a.href = '/cuda/' + (r.simul_id ?? '');
+    a.textContent = r.simul_id ?? '';
+    td_id.appendChild(a);
+
+    const td_type = document.createElement('td'); td_type.textContent = r.simul_type ?? '';
+    const td_main = document.createElement('td'); td_main.textContent = r.main_simul_id ?? '';
+    const td_name = document.createElement('td'); td_name.textContent = r.simul_name ?? '';
+    const td_fd   = document.createElement('td'); td_fd.textContent   = r.simul_from_date ?? '';
+    const td_td   = document.createElement('td'); td_td.textContent   = r.simul_to_date ?? '';
+    const td_case = document.createElement('td'); td_case.textContent = r.case_cnt ?? ''; td_case.className = 'right';
+    const td_end  = document.createElement('td'); td_end.textContent  = r.end_time ?? '';
+
+    tr.appendChild(td_id);
+    tr.appendChild(td_type);
+    tr.appendChild(td_main);
+    tr.appendChild(td_name);
+    tr.appendChild(td_fd);
+    tr.appendChild(td_td);
+    tr.appendChild(td_case);
+    tr.appendChild(td_end);
+
+    tbody.appendChild(tr);
+  }
+  document.getElementById('status').textContent = 'Rows: ' + filtered.length;
+}
+
+async function reload(){
+  const limitSel = document.getElementById('limit');
+  const filterInput = document.getElementById('filter');
+  const limit = parseInt(limitSel.value, 10);
+  const status = document.getElementById('status');
+  status.textContent = 'Loading...';
+
+  try{
+    const data = await loadSimulList(limit);
+    const items = data.items || [];
+    window.__lastItems = items; // 필터링 캐시
+    renderTable(items, filterInput.value.trim());
+    status.textContent = 'Rows: ' + items.length;
+  }catch(err){
+    status.textContent = 'Error: ' + err.message;
+    console.error(err);
+  }
+}
+
+document.getElementById('reloadBtn').addEventListener('click', reload);
+document.getElementById('filter').addEventListener('input', () => {
+  const items = window.__lastItems || [];
+  renderTable(items, document.getElementById('filter').value.trim());
+});
+
+// 초기 로딩
+(async () => {
+  try{
+    await reload();
+  }catch(e){
+    document.getElementById('status').textContent = 'Error: ' + e.message;
+  }
+})();
+</script>
+</body>
+</html>
+

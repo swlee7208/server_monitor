@@ -1,0 +1,265 @@
+from flask import Flask, render_template, jsonify, request, redirect, url_for
+import psutil
+import subprocess
+import os
+from datetime import datetime
+from decimal import Decimal
+
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+except ImportError:
+    psycopg2 = None
+
+app = Flask(__name__)
+
+# =============================
+# Config by ENV
+# =============================
+DB_HOST   = os.getenv('ALPHA_DB_HOST', os.getenv('PGHOST', '127.0.0.1'))
+DB_PORT   = int(os.getenv('ALPHA_DB_PORT', os.getenv('PGPORT', '5432')))
+DB_NAME   = os.getenv('ALPHA_DB_NAME', os.getenv('PGDATABASE', 'stock'))
+DB_USER   = os.getenv('ALPHA_DB_USER', os.getenv('PGUSER', 'postgres'))
+DB_PASS   = os.getenv('ALPHA_DB_PASS', os.getenv('PGPASSWORD', 'db4woo'))
+DB_SCHEMA = os.getenv('ALPHA_DB_SCHEMA', 'alpha')
+
+SIMUL_TABLE  = os.getenv('ALPHA_SIMUL_TABLE',  'alpha_cuda_simul')
+RESULT_TABLE = os.getenv('ALPHA_RESULT_TABLE', 'cuda_simul_result')
+
+# 목록/상세에서 기대하는 기본 컬럼 세트(상황에 따라 일부 없으면 제외)
+SIMUL_EXPECTED = [
+    'simul_id', 'simul_type', 'main_simul_id', 'simul_name',
+    'simul_from_date', 'simul_to_date', 'case_cnt', 'end_time'
+]
+DETAIL_REQUIRED_MIN = ['simul_id', 'gid', 'wins', 'trades']  # 최소 요구
+DETAIL_OPTIONAL = ['total_profit'] + \
+    [f'p{i}_name' for i in range(1, 21)] + [f'p{i}_val' for i in range(1, 21)]
+
+# =============================
+# Monitor helpers
+# =============================
+def get_gpu_usage():
+    try:
+        output = subprocess.check_output(
+            [
+                'nvidia-smi',
+                '--query-gpu=utilization.gpu,temperature.gpu,memory.used,memory.total',
+                '--format=csv,noheader,nounits'
+            ]
+        ).decode('utf-8').strip()
+
+        gpu_list = []
+        for line in output.split('\n'):
+            gpu_util, gpu_temp, mem_used, mem_total = map(int, line.split(', '))
+            gpu_list.append({
+                'gpu_util': gpu_util,
+                'gpu_temp': gpu_temp,
+                'mem_used': mem_used,
+                'mem_total': mem_total
+            })
+        return gpu_list
+    except Exception:
+        return []
+
+def get_cpu_temp():
+    try:
+        temps = psutil.sensors_temperatures()
+        if 'coretemp' in temps:
+            return temps['coretemp'][0].current
+        elif 'cpu-thermal' in temps:
+            return temps['cpu-thermal'][0].current
+    except Exception:
+        return None
+    return None
+
+# =============================
+# DB helpers
+# =============================
+def get_pg_conn():
+    if psycopg2 is None:
+        raise RuntimeError("psycopg2 is not installed. Run: pip install psycopg2-binary")
+    return psycopg2.connect(
+        host=DB_HOST, port=DB_PORT, dbname=DB_NAME, user=DB_USER, password=DB_PASS,
+        connect_timeout=5, keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=3
+    )
+
+def qualify(table_name: str) -> str:
+    # 스키마 한정: public.my_table → "public"."my_table" (대소문자 안전)
+    return f'"{DB_SCHEMA}"."{table_name}"'
+
+def get_table_columns(conn, table_name: str):
+    sql = """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = %s AND table_name = %s
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql, (DB_SCHEMA, table_name))
+        return {row[0] for row in cur.fetchall()}
+
+# =============================
+# Query builders (column-adaptive)
+# =============================
+def fetch_simul_list(limit=200):
+    with get_pg_conn() as conn:
+        cols = get_table_columns(conn, SIMUL_TABLE)
+        present = [c for c in SIMUL_EXPECTED if c in cols]
+        if 'simul_id' not in present:
+            raise RuntimeError(f'[{DB_SCHEMA}.{SIMUL_TABLE}] must contain simul_id (not found). Existing cols={sorted(list(cols))}')
+
+        # SELECT 절 동적 구성 (존재하는 컬럼만)
+        select_list = ', '.join([f'{c}' for c in present])
+        sql = f'''
+            SELECT {select_list}
+            FROM {qualify(SIMUL_TABLE)}
+            ORDER BY
+                {"end_time DESC NULLS LAST," if "end_time" in present else ""}
+                simul_id DESC
+            LIMIT %s
+        '''
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(sql, (limit,))
+            rows = cur.fetchall()
+
+    # 날짜/시간 문자열 정리
+    for r in rows:
+        if 'simul_from_date' in r and r['simul_from_date'] is not None:
+            r['simul_from_date'] = str(r['simul_from_date'])
+        if 'simul_to_date' in r and r['simul_to_date'] is not None:
+            r['simul_to_date'] = str(r['simul_to_date'])
+        if 'end_time' in r and r['end_time'] is not None:
+            if isinstance(r['end_time'], datetime):
+                r['end_time'] = r['end_time'].strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                r['end_time'] = str(r['end_time'])
+    return rows
+
+
+def fetch_simul_detail(simul_id: int, limit=500):
+    with get_pg_conn() as conn:
+        cols = get_table_columns(conn, RESULT_TABLE)
+
+        # 필수 최소 컬럼 확인
+        missing = [c for c in DETAIL_REQUIRED_MIN if c not in cols]
+        if missing:
+            raise RuntimeError(
+                f'[{DB_SCHEMA}.{RESULT_TABLE}] missing required columns: {missing}. Existing cols={sorted(list(cols))}'
+            )
+
+        # 실제 존재하는 컬럼으로 SELECT 구성
+        select_cols = [c for c in DETAIL_REQUIRED_MIN if c in cols]
+        select_cols += [c for c in DETAIL_OPTIONAL if c in cols]
+        select_list = ', '.join(select_cols)
+
+        sql = f'''
+            SELECT {select_list}
+            FROM {qualify(RESULT_TABLE)}
+            WHERE simul_id = %s
+            ORDER BY
+                CASE
+                    WHEN trades IS NOT NULL AND trades > 0 THEN (wins::float / trades) * 100.0
+                    ELSE -1
+                END DESC,
+                {"total_profit DESC NULLS LAST," if "total_profit" in cols else ""}
+                gid ASC
+            LIMIT %s
+        '''
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(sql, (simul_id, limit))
+            rows = cur.fetchall()
+
+    # 🔹 후처리: Decimal → float 변환
+    for r in rows:
+        for k, v in r.items():
+            if isinstance(v, Decimal):
+                r[k] = float(v)
+
+        tc = r.get('trades') or 0
+        wc = r.get('wins') or 0
+        r['win_rate'] = round((wc * 100.0) / tc, 2) if tc > 0 else None
+
+        # 파라미터 요약 (name이 비어있지 않을 때만, 값이 None이 아니면 0이라도 포함)
+        params = []
+        for i in range(1, 21):
+            name_key = f"p{i}_name"
+            val_key  = f"p{i}_val"
+            if name_key in r and val_key in r:
+                name = r.get(name_key)
+                val  = r.get(val_key)
+
+                # 이름이 설정돼 있는 경우만 추가
+                if name not in (None, '') and val is not None:
+                    # Decimal -> float 변환
+                    if isinstance(val, Decimal):
+                        val = float(val)
+                    params.append(f"{name}={val}")
+        r['param_summary'] = "; ".join(params) if params else None
+
+    return rows
+
+
+# =============================
+# Pages
+# =============================
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/cuda')
+def cuda_entry():
+    sid = request.args.get('simul_id', type=int)
+    if sid and sid > 0:
+        return redirect(url_for('cuda_detail_page', simul_id=sid))
+    return render_template('cuda.html')
+
+@app.route('/cuda/<int:simul_id>')
+def cuda_detail_page(simul_id: int):
+    return render_template('simul_detail.html', simul_id=simul_id)
+
+# =============================
+# APIs
+# =============================
+@app.route('/api/status')
+def status():
+    cpu_percent = psutil.cpu_percent(interval=0.5)
+    cpu_temp = get_cpu_temp()
+    ram = psutil.virtual_memory()
+    gpus = get_gpu_usage()
+
+    return jsonify({
+        'cpu': cpu_percent,
+        'cpu_temp': cpu_temp,
+        'ram_used': ram.used // (1024**2),
+        'ram_total': ram.total // (1024**2),
+        'gpus': gpus
+    })
+
+@app.route('/api/simul_list')
+def api_simul_list():
+    try:
+        limit = int(request.args.get('limit', '200'))
+        limit = max(1, min(limit, 2000))
+        rows = fetch_simul_list(limit=limit)
+        return jsonify({'items': rows})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/simul_detail')
+def api_simul_detail():
+    simul_id = request.args.get('simul_id', type=int)
+    if simul_id is None or simul_id < 0:
+        return jsonify({'error': 'simul_id is required (> 0)'}), 400
+    limit = request.args.get('limit', default=500, type=int)
+    try:
+        limit = max(1, min(limit, 5000))
+        rows = fetch_simul_detail(simul_id, limit=limit)
+        return jsonify({'items': rows})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# =============================
+# Main
+# =============================
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
+

@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Simulation Regist</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin:0; }
+    nav { background:#343a40; padding:10px; display:flex; gap:20px; }
+    nav a { color:#fff; text-decoration:none; font-weight:bold; }
+    nav a:hover { text-decoration:underline; }
+    .container { padding:20px; }
+    .form-row { display:grid; grid-template-columns: 160px 1fr 160px 1fr; gap:8px 12px; align-items:center; }
+    .form-row input, .form-row select, .form-row textarea { padding:6px 8px; }
+    .form-row textarea { height:60px; resize:vertical; }
+    .btns { margin:12px 0; display:flex; gap:10px; flex-wrap:wrap; }
+    button { padding:6px 12px; }
+    table { border-collapse: collapse; width:100%; margin-top:12px; }
+    th, td { border:1px solid #ccc; padding:6px 8px; font-size:13px; }
+    tr:hover { background:#f5f7fa; cursor:pointer; }
+    .small { font-size:12px; color:#333; }
+  </style>
+</head>
+<body>
+<nav>
+  <a href="/">Server Monitor</a>
+  <a href="/cuda">Alpha Cuda Simul</a>
+  <a href="/simul">Simulation Regist</a>
+  <a href="/paramset">Parameta Set Regist</a>
+</nav>
+
+<div class="container">
+  <h3>Simulation Regist</h3>
+
+  <div class="form-row">
+    <label>simul_id</label>
+    <input id="f_id" type="number" placeholder="(PK, required)">
+
+    <label>simul_name</label>
+    <input id="f_name" type="text" maxlength="64">
+
+    <label>simul_desc</label>
+    <textarea id="f_desc" maxlength="256" placeholder="optional"></textarea>
+
+    <label>param_set_id</label>
+    <input id="f_param" type="number" placeholder="">
+
+    <label>simul_from_date</label>
+    <input id="f_from" type="text" placeholder="yyyyMMddHHmmss or ISO">
+
+    <label>simul_to_date</label>
+    <input id="f_to" type="text" placeholder="yyyyMMddHHmmss or ISO">
+
+    <label>simul_candle</label>
+    <input id="f_candle" type="number" placeholder="ex) 20">
+
+    <label>simul_type</label>
+    <select id="f_type">
+      <option value="0">0 (주전략)</option>
+      <option value="1">1 (혼잡도 조합)</option>
+    </select>
+
+    <label>main_simul_id</label>
+    <input id="f_main" type="number" placeholder="(optional)">
+
+    <label>main_top_rank</label>
+    <input id="f_top" type="number" placeholder="(optional)">
+
+    <label>param_set_id</label>
+    <input id="f_param" type="number" placeholder="(optional)">
+
+    <label>reason</label>
+    <input id="f_reason" type="text" maxlength="256" placeholder="(optional)">
+
+    <label>is_active</label> <!-- NEW -->
+    <select id="f_active">
+        <option value="1">1 (활성)</option>
+        <option value="0">0 (비활성)</option>
+    </select>
+  </div>
+
+  <div class="btns">
+    <button id="btnAdd" type="button">Add</button>
+    <button id="btnSave" type="button">Save</button>
+    <button id="btnClear" type="button">Clear</button>
+    <button id="btnReload" type="button">Reload</button>
+
+  </div>
+
+  <table id="tbl">
+    <thead>
+      <tr>
+        <th>simul_id</th>
+        <th>simul_name</th>
+        <th>simul_type</th>
+        <th>reg_time</th>
+        <th>simul_from_date ~ simul_to_date</th>
+        <th>param_set_id</th>  <!-- NEW -->
+        <th>is_active</th>     <!-- NEW -->
+        <th>status</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  // ===== DOM 캐싱 (폼 요소/버튼들) =====
+  const f_id     = document.getElementById('f_id');
+  const f_name   = document.getElementById('f_name');
+  const f_desc   = document.getElementById('f_desc');
+  const f_from   = document.getElementById('f_from');
+  const f_to     = document.getElementById('f_to');
+  const f_candle = document.getElementById('f_candle');
+  const f_type   = document.getElementById('f_type');
+  const f_main   = document.getElementById('f_main');
+  const f_top    = document.getElementById('f_top');
+  const f_param  = document.getElementById('f_param');
+  const f_active = document.getElementById('f_active');
+  const f_reason = document.getElementById('f_reason');
+
+  const btnAdd    = document.getElementById('btnAdd');
+  const btnSave   = document.getElementById('btnSave');   // ← id 오타 주의(“sava” X)
+  const btnClear  = document.getElementById('btnClear');
+  const btnReload = document.getElementById('btnReload');
+
+  const tbody = document.querySelector('#tbl tbody');
+
+  // ===== 공용 헬퍼 =====
+  async function api(url, init = {}) {
+    const res = await fetch(url, {
+      headers: {'Content-Type': 'application/json'},
+      ...init
+    });
+    const js = await res.json().catch(() => ({}));
+    if (!res.ok || js.ok === false) {
+      throw new Error(js.error || res.statusText);
+    }
+    return js;
+  }
+  const typeName   = (t) => Number(t) === 1 ? '혼잡도 조합(1)' : '주전략(0)';
+  const activeName = (a) => Number(a) === 1 ? '활성(1)' : '비활성(0)';
+
+  function rowHtml(r){
+    const sid   = (r.simul_id ?? '') + '';
+    const name  = r.simul_name || '';
+    const typeS = typeName(r.simul_type);
+    const regS  = r.reg_time || '';
+    const fromS = r.simul_from_date || '';
+    const toS   = r.simul_to_date || '';
+    const span  = (fromS && toS) ? `${fromS} ~ ${toS}` : (fromS || toS);
+    const pid   = (r.param_set_id ?? '-') + '';
+    const actS  = activeName(r.is_active);
+    const status= (r.status ?? '') + '';
+
+    return `<tr data-id="${sid}">
+      <td>${sid}</td>
+      <td>${name}</td>
+      <td>${typeS}</td>
+      <td class="small">${regS}</td>
+      <td class="small">${span}</td>
+      <td>${pid}</td>
+      <td>${actS}</td>
+      <td>${status}</td>
+    </tr>`;
+  }
+
+  function fillFormFromRow(tr){
+    const tds = tr.children;
+    const idText   = (tds[0]?.innerText || '').trim();
+    const nameText = (tds[1]?.innerText || '').trim();
+    const typeText = (tds[2]?.innerText || '').trim();
+    const period   = (tds[4]?.innerText || '').trim();
+    const pidText  = (tds[5]?.innerText || '').trim();
+    const actText  = (tds[6]?.innerText || '').trim();
+
+    f_id.value   = idText ? Number(idText) : '';
+    f_name.value = nameText;
+    f_type.value = (typeText.includes('(1)')) ? '1' : '0';
+
+    const parts = period.split('~');
+    f_from.value = (parts[0]||'').trim();
+    f_to.value   = (parts[1]||'').trim();
+
+    f_param.value  = (pidText === '-' ? '' : pidText);
+    f_active.value = (actText.includes('(1)')) ? '1' : '0';
+  }
+
+  async function fetchSimulList(){
+    // 목록은 검증된 API 사용
+    const js = await api('/api/simul_list?limit=1000', { method: 'GET' });
+    return js.items || [];
+  }
+
+  async function reloadList(){
+    const items = await fetchSimulList();
+    tbody.innerHTML = items.map(rowHtml).join('');
+    const first = tbody.querySelector('tr');
+    if (first) fillFormFromRow(first);
+  }
+
+  function clearForm(){
+    f_id.value = '';
+    f_name.value = '';
+    f_desc.value = '';
+    f_from.value = '';
+    f_to.value = '';
+    f_candle.value = '';
+    f_type.value = '0';
+    f_main.value = '';
+    f_top.value = '';
+    f_param.value = '';
+    f_active.value = '1';
+    f_reason.value = '';
+  }
+
+  async function addSimul(){
+    const payload = {
+      simul_id:        Number(f_id.value),
+      simul_name:      f_name.value,
+      simul_desc:      f_desc.value,
+      simul_from_date: f_from.value,
+      simul_to_date:   f_to.value,
+      simul_candle:    f_candle.value ? Number(f_candle.value) : null,
+      simul_type:      Number(f_type.value),
+      main_simul_id:   f_main.value ? Number(f_main.value) : null,
+      main_top_rank:   f_top.value ? Number(f_top.value) : null,
+      param_set_id:    f_param.value ? Number(f_param.value) : null,
+      is_active:       Number(f_active.value),
+      reason:          f_reason.value
+    };
+    const js = await api('/api/simulation', { method: 'POST', body: JSON.stringify(payload) });
+    alert('Inserted simul_id=' + js.simul_id);
+    await reloadList();
+    clearForm();
+  }
+
+  async function saveSimul(){
+    if (!f_id.value) { alert('Select a row or input simul_id.'); return; }
+    const payload = {
+      simul_id:        Number(f_id.value),
+      simul_name:      f_name.value,
+      simul_desc:      f_desc.value,
+      simul_from_date: f_from.value,
+      simul_to_date:   f_to.value,
+      simul_candle:    f_candle.value ? Number(f_candle.value) : null,
+      simul_type:      Number(f_type.value),
+      main_simul_id:   f_main.value ? Number(f_main.value) : null,
+      main_top_rank:   f_top.value ? Number(f_top.value) : null,
+      param_set_id:    f_param.value ? Number(f_param.value) : null,
+      is_active:       Number(f_active.value),
+      reason:          f_reason.value
+    };
+    await api('/api/simulation', { method: 'PUT', body: JSON.stringify(payload) });
+    alert('Saved.');
+    await reloadList();
+  }
+
+  // ===== 이벤트 바인딩 =====
+  // 테이블 행 클릭 → 폼 채우기
+  tbody.addEventListener('click', (e) => {
+    const tr = e.target.closest('tr');
+    if (tr) fillFormFromRow(tr);
+  });
+
+  // 버튼들 (폼 submit 막기 위해 preventDefault + 버튼 type="button" 권장)
+  btnAdd?.addEventListener('click',  (e) => { e.preventDefault(); addSimul().catch(err => alert(err.message)); });
+  btnSave?.addEventListener('click', (e) => { e.preventDefault(); saveSimul().catch(err => alert(err.message)); });
+  btnClear?.addEventListener('click',(e) => { e.preventDefault(); clearForm(); });
+  btnReload?.addEventListener('click',(e) => { e.preventDefault(); reloadList().catch(err => alert(err.message)); });
+
+  // ===== 최초 로드 (이제 안전) =====
+  reloadList().catch(err => {
+    console.error(err);
+    alert('List load failed: ' + err.message);
+  });
+});
+</script>
+
+
+
+
+
+</body>
+</html>
+
