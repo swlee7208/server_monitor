@@ -2,6 +2,7 @@ from flask import Flask, render_template, jsonify, request, redirect, url_for
 import psutil
 import subprocess
 import os
+import re
 from datetime import datetime
 from decimal import Decimal
 
@@ -21,19 +22,147 @@ DB_PORT   = int(os.getenv('ALPHA_DB_PORT', os.getenv('PGPORT', '5432')))
 DB_NAME   = os.getenv('ALPHA_DB_NAME', os.getenv('PGDATABASE', 'stock'))
 DB_USER   = os.getenv('ALPHA_DB_USER', os.getenv('PGUSER', 'postgres'))
 DB_PASS   = os.getenv('ALPHA_DB_PASS', os.getenv('PGPASSWORD', 'db4woo'))
+# cuda 테이블이 alpha 스키마에 있는 경우가 많아서 기본값을 alpha로 둠
 DB_SCHEMA = os.getenv('ALPHA_DB_SCHEMA', 'alpha')
 
+# 테이블명 커스터마이즈 가능
 SIMUL_TABLE  = os.getenv('ALPHA_SIMUL_TABLE',  'alpha_cuda_simul')
 RESULT_TABLE = os.getenv('ALPHA_RESULT_TABLE', 'cuda_simul_result')
+PARAM_TABLE = os.getenv('ALPHA_PARAM_TABLE',   'simul_param_set')
 
-# 목록/상세에서 기대하는 기본 컬럼 세트(상황에 따라 일부 없으면 제외)
-SIMUL_EXPECTED = [
-    'simul_id', 'simul_type', 'main_simul_id', 'simul_name',
-    'simul_from_date', 'simul_to_date', 'case_cnt', 'end_time'
+ENV_TABLE = os.getenv('ALPHA_ENV_TABLE', 'alpha_env')
+APPLY_ENABLED = os.getenv('ALPHA_ENABLE_APPLY', '1')
+
+valid_ident = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')  # 컬럼명 검증용
+
+
+# 상세에서의 별칭 기준(둘 중 하나만 있어도 됨 → alias로 통일)
+CANONICAL_MIN = {
+    'simul_id': ['simul_id'],
+    'gid':      ['gid', 'case_id'],
+    'wins':     ['wins', 'win_cnt'],
+    'trades':   ['trades', 'trade_cnt'],
+}
+
+
+# ====== Simulation 컬럼 사양 ======
+# 리스트(하단 테이블)에 보여줄 컬럼
+SIMUL_LIST_EXPECTED = [
+    'simul_id', 'simul_name', 'simul_type',
+    'reg_time', 'simul_from_date', 'simul_to_date',
+    'param_set_id',              # NEW
+    'is_active',                 # NEW
+    'status', 'simul_candle', 'simul_desc', 'main_simul_id', 'main_top_rank'
 ]
-DETAIL_REQUIRED_MIN = ['simul_id', 'gid', 'wins', 'trades']  # 최소 요구
-DETAIL_OPTIONAL = ['total_profit'] + \
-    [f'p{i}_name' for i in range(1, 21)] + [f'p{i}_val' for i in range(1, 21)]
+
+# 쓰기(등록/수정) 허용 컬럼 (요청한 입력 항목)
+SIMUL_WRITE_FIELDS = [
+    'simul_id', 'simul_name', 'simul_desc', 'is_active',
+    'simul_from_date', 'simul_to_date', 'simul_candle',
+    'simul_type', 'main_simul_id', 'main_top_rank', 'param_set_id',
+    'reason'
+]
+
+
+
+# =========[ helpers: Decimal cnt / total cases ]=========
+from decimal import Decimal, getcontext
+getcontext().prec = 28
+
+def _calc_data_cnt(minv, maxv, step) -> int:
+    """[data_cnt] = floor((max - min) / step) + 1, Decimal로 안전 계산"""
+    if minv is None or maxv is None or step is None:
+        return 0
+    a = Decimal(str(minv))
+    b = Decimal(str(maxv))
+    s = Decimal(str(step))
+    if s <= 0 or a > b:
+        return 0
+    # 0.1, 0.01 등 이진표현 오차 방지 위해 Decimal 사용
+    n = (b - a) / s
+    # 음수/실수 입력을 방어적으로 보정
+    n_int = int(n.to_integral_value(rounding='ROUND_FLOOR'))
+    return n_int + 1
+
+def _fetch_paramset_rows(set_id: int):
+    with get_pg_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+        sql = f'''
+            SELECT set_id, param_no, param_name, param_desc, data_type,
+                   data_min, data_max, data_step_size, data_cnt, is_active
+            FROM {qualify(PARAM_TABLE)}
+            WHERE set_id = %s
+            ORDER BY param_no ASC
+        '''
+        cur.execute(sql, (set_id,))
+        rows = cur.fetchall()
+
+    # total_cases = 활성화된 data_cnt의 곱
+    total_cases = 0
+    prod = 1
+    active_any = False
+    for r in rows:
+        if int(r.get('is_active', 0)) == 1:
+            c = int(r.get('data_cnt') or 0)
+            active_any = True
+            prod *= max(c, 0)
+    if active_any:
+        total_cases = prod
+    return rows, total_cases
+
+
+# ---- 날짜 파서 (timestamp 컬럼용) ----
+from datetime import datetime
+
+def _parse_ts(v):
+    """입력값 v를 timestamp로 파싱. 'yyyyMMddHHmmss' 또는 ISO-8601 허용."""
+    if v is None:
+        return None
+    s = str(v).strip()
+    if not s:
+        return None
+    # 14자리(yyyyMMddHHmmss)
+    if len(s) == 14 and s.isdigit():
+        return datetime.strptime(s, "%Y%m%d%H%M%S")
+    # ISO 시도 (yyyy-mm-dd hh:mm:ss 등)
+    try:
+        # 3.11 이하 호환: fromisoformat 실패 시 strptime 재시도
+        return datetime.fromisoformat(s.replace(' ', 'T'))
+    except Exception:
+        pass
+    # fallback common patterns
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S",
+                "%Y-%m-%d", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(s, fmt)
+        except Exception:
+            continue
+    raise ValueError(f"Invalid timestamp format: {s}")
+
+def _clean_simul_payload(raw: dict) -> dict:
+    """입력 payload 정리/검증: 허용 필드만 추출 + 형식 변환"""
+    data = {}
+    for k in SIMUL_WRITE_FIELDS:
+        if k not in raw:
+            continue
+        v = raw[k]
+        if k in ('simul_id', 'simul_candle', 'simul_type',
+                 'main_simul_id', 'main_top_rank', 'param_set_id', 'is_active'):
+            data[k] = None if v is None or str(v).strip() == '' else int(v)
+        elif k in ('simul_from_date', 'simul_to_date'):
+            data[k] = _parse_ts(v)
+        elif k in ('simul_name', 'simul_desc', 'reason'):
+            data[k] = None if v is None else str(v).strip()
+        else:
+            data[k] = v
+    return data
+
+def _filter_existing_cols(conn, table_name: str, payload: dict) -> dict:
+    cols = get_table_columns(conn, table_name)
+    return {k: v for k, v in payload.items() if k in cols}
+
+
+
+
 
 # =============================
 # Monitor helpers
@@ -84,7 +213,7 @@ def get_pg_conn():
     )
 
 def qualify(table_name: str) -> str:
-    # 스키마 한정: public.my_table → "public"."my_table" (대소문자 안전)
+    # "alpha"."cuda_simul_result" 같은 형식으로 안전하게
     return f'"{DB_SCHEMA}"."{table_name}"'
 
 def get_table_columns(conn, table_name: str):
@@ -97,23 +226,45 @@ def get_table_columns(conn, table_name: str):
         cur.execute(sql, (DB_SCHEMA, table_name))
         return {row[0] for row in cur.fetchall()}
 
+def _alias_if_exists(cols, options, alias):
+    """options 중 존재하는 첫 원본 컬럼을 alias로 선택."""
+    for c in options:
+        if c in cols:
+            return f'{c} AS {alias}'
+    return None
+
 # =============================
-# Query builders (column-adaptive)
+# Query helpers
 # =============================
 def fetch_simul_list(limit=200):
     with get_pg_conn() as conn:
-        cols = get_table_columns(conn, SIMUL_TABLE)
-        present = [c for c in SIMUL_EXPECTED if c in cols]
-        if 'simul_id' not in present:
-            raise RuntimeError(f'[{DB_SCHEMA}.{SIMUL_TABLE}] must contain simul_id (not found). Existing cols={sorted(list(cols))}')
+        cols = get_table_columns(conn, SIMUL_TABLE)  # 테이블 실제 컬럼 집합
+        present = [c for c in SIMUL_LIST_EXPECTED if c in cols]
 
-        # SELECT 절 동적 구성 (존재하는 컬럼만)
-        select_list = ', '.join([f'{c}' for c in present])
+        if 'simul_id' not in present:
+            raise RuntimeError(f'[{DB_SCHEMA}.{SIMUL_TABLE}] must contain simul_id. Existing cols={sorted(list(cols))}')
+
+        # simul_id는 명시 alias로
+        select_cols = []
+        for c in present:
+            if c == 'simul_id':
+                select_cols.append('simul_id AS simul_id')
+            else:
+                select_cols.append(c)
+        select_list = ', '.join(select_cols)
+
+        # 정렬 우선순위: end_time > reg_time > simul_id
+        order_prefix = ''
+        if 'end_time' in cols:
+            order_prefix = 'end_time DESC NULLS LAST,'
+        elif 'reg_time' in cols:
+            order_prefix = 'reg_time DESC NULLS LAST,'
+
         sql = f'''
             SELECT {select_list}
             FROM {qualify(SIMUL_TABLE)}
             ORDER BY
-                {"end_time DESC NULLS LAST," if "end_time" in present else ""}
+                {order_prefix}
                 simul_id DESC
             LIMIT %s
         '''
@@ -121,36 +272,47 @@ def fetch_simul_list(limit=200):
             cur.execute(sql, (limit,))
             rows = cur.fetchall()
 
-    # 날짜/시간 문자열 정리
+    # 날짜/시간 문자열화
     for r in rows:
-        if 'simul_from_date' in r and r['simul_from_date'] is not None:
-            r['simul_from_date'] = str(r['simul_from_date'])
-        if 'simul_to_date' in r and r['simul_to_date'] is not None:
-            r['simul_to_date'] = str(r['simul_to_date'])
-        if 'end_time' in r and r['end_time'] is not None:
-            if isinstance(r['end_time'], datetime):
-                r['end_time'] = r['end_time'].strftime('%Y-%m-%d %H:%M:%S')
-            else:
-                r['end_time'] = str(r['end_time'])
+        for k in ('simul_from_date', 'simul_to_date', 'end_time', 'reg_time'):
+            if k in r and r[k] is not None:
+                if isinstance(r[k], datetime):
+                    r[k] = r[k].strftime('%Y-%m-%d %H:%M:%S')
+                else:
+                    r[k] = str(r[k])
     return rows
+
 
 
 def fetch_simul_detail(simul_id: int, limit=500):
     with get_pg_conn() as conn:
         cols = get_table_columns(conn, RESULT_TABLE)
 
-        # 필수 최소 컬럼 확인
-        missing = [c for c in DETAIL_REQUIRED_MIN if c not in cols]
-        if missing:
+        # 필수(별칭) 준비
+        sel_min = []
+        for alias, options in CANONICAL_MIN.items():
+            piece = _alias_if_exists(cols, options, alias)
+            if piece:
+                sel_min.append(piece)
+        missing_aliases = [a for a in CANONICAL_MIN if not any(a in s for s in sel_min)]
+        if missing_aliases:
             raise RuntimeError(
-                f'[{DB_SCHEMA}.{RESULT_TABLE}] missing required columns: {missing}. Existing cols={sorted(list(cols))}'
+                f'[{DB_SCHEMA}.{RESULT_TABLE}] missing required columns for {missing_aliases}. Existing cols={sorted(list(cols))}'
             )
 
-        # 실제 존재하는 컬럼으로 SELECT 구성
-        select_cols = [c for c in DETAIL_REQUIRED_MIN if c in cols]
-        select_cols += [c for c in DETAIL_OPTIONAL if c in cols]
-        select_list = ', '.join(select_cols)
+        # 선택 컬럼: total_profit 유사 + p{i}_name/val
+        select_opt = []
+        tp = _alias_if_exists(cols, ['total_profit', 'total_profit_ptr', 'profit_ptr'], 'total_profit')
+        if tp:
+            select_opt.append(tp)
+        for i in range(1, 21):
+            nk, vk = f'p{i}_name', f'p{i}_val'
+            if nk in cols: select_opt.append(nk)
+            if vk in cols: select_opt.append(vk)
 
+        select_list = ', '.join(sel_min + select_opt) if select_opt else ', '.join(sel_min)
+
+        # 승율 정렬
         sql = f'''
             SELECT {select_list}
             FROM {qualify(RESULT_TABLE)}
@@ -160,17 +322,30 @@ def fetch_simul_detail(simul_id: int, limit=500):
                     WHEN trades IS NOT NULL AND trades > 0 THEN (wins::float / trades) * 100.0
                     ELSE -1
                 END DESC,
-                {"total_profit DESC NULLS LAST," if "total_profit" in cols else ""}
+                {"total_profit DESC NULLS LAST," if "total_profit" in (tp or "") else ""}
                 gid ASC
             LIMIT %s
         '''
+
+        # 수익포인트 정렬
+        sql2 = f"""
+            SELECT {select_list}
+            FROM {qualify(RESULT_TABLE)}
+            WHERE simul_id = %s
+            ORDER BY
+                (total_profit)::double precision DESC NULLS LAST,
+                CASE WHEN trades IS NOT NULL AND trades > 0 THEN wins::float / trades ELSE -1 END DESC,
+                gid ASC
+            LIMIT %s
+        """
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(sql, (simul_id, limit))
+            cur.execute(sql2, (simul_id, limit))
             rows = cur.fetchall()
 
-    # 🔹 후처리: Decimal → float 변환
+
+    # 후처리: Decimal → float, win_rate, param_summary
     for r in rows:
-        for k, v in r.items():
+        for k, v in list(r.items()):
             if isinstance(v, Decimal):
                 r[k] = float(v)
 
@@ -178,25 +353,17 @@ def fetch_simul_detail(simul_id: int, limit=500):
         wc = r.get('wins') or 0
         r['win_rate'] = round((wc * 100.0) / tc, 2) if tc > 0 else None
 
-        # 파라미터 요약 (name이 비어있지 않을 때만, 값이 None이 아니면 0이라도 포함)
+        # 이름이 있고 값이 None이 아니면 포함 (0도 포함)
         params = []
         for i in range(1, 21):
-            name_key = f"p{i}_name"
-            val_key  = f"p{i}_val"
-            if name_key in r and val_key in r:
-                name = r.get(name_key)
-                val  = r.get(val_key)
-
-                # 이름이 설정돼 있는 경우만 추가
-                if name not in (None, '') and val is not None:
-                    # Decimal -> float 변환
-                    if isinstance(val, Decimal):
-                        val = float(val)
-                    params.append(f"{name}={val}")
+            nk, vk = f'p{i}_name', f'p{i}_val'
+            name = r.get(nk, None)
+            val  = r.get(vk, None)
+            if name is not None and str(name).strip() != '' and val is not None:
+                params.append(f"{name}={val}")
         r['param_summary'] = "; ".join(params) if params else None
 
     return rows
-
 
 # =============================
 # Pages
@@ -207,6 +374,7 @@ def index():
 
 @app.route('/cuda')
 def cuda_entry():
+    # 쿼리로 들어오는 경우 정규 경로로 리다이렉트
     sid = request.args.get('simul_id', type=int)
     if sid and sid > 0:
         return redirect(url_for('cuda_detail_page', simul_id=sid))
@@ -215,6 +383,10 @@ def cuda_entry():
 @app.route('/cuda/<int:simul_id>')
 def cuda_detail_page(simul_id: int):
     return render_template('simul_detail.html', simul_id=simul_id)
+
+@app.route('/simul')
+def simul_regist_page():
+    return render_template('simul_regist.html')
 
 # =============================
 # APIs
@@ -257,9 +429,278 @@ def api_simul_detail():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/apply_env_update', methods=['POST'])
+def api_apply_env_update():
+    """
+    JSON 예:
+    {
+      "env_no": 5,
+      "updates": {
+        "s1m1_real_entry_avg_spread": 1.1,
+        "s1m1_real_entry_profit": 1.5,
+        "s1m1_clear_negative_avg_spread": 1.6,
+        "is_s1m1_avg3": 0, "is_s1m1_avg10": 1, ...
+      }
+    }
+    """
+    if not APPLY_ENABLED:
+        return jsonify({
+            'ok': False,
+            'error': 'Apply is disabled by server. Set ALPHA_ENABLE_APPLY=1 and restart.'
+        }), 403
+
+    data = request.get_json(silent=True) or {}
+    env_no = data.get('env_no', None)
+    updates = data.get('updates', None)
+
+    if not isinstance(env_no, int) or env_no <= 0:
+        return jsonify({'ok': False, 'error': 'env_no must be positive integer'}), 400
+    if not isinstance(updates, dict) or not updates:
+        return jsonify({'ok': False, 'error': 'updates must be a non-empty object'}), 400
+
+    try:
+        with get_pg_conn() as conn:
+            cols = get_table_columns(conn, ENV_TABLE)  # 해당 테이블 실제 컬럼 목록
+            # 컬럼명 검증 + 존재 검증
+            bad_ident = [c for c in updates.keys() if not valid_ident.match(c)]
+            if bad_ident:
+                return jsonify({'ok': False, 'error': f'invalid column identifiers: {bad_ident}'}), 400
+
+            unknown = [c for c in updates.keys() if c not in cols]
+            if unknown:
+                return jsonify({'ok': False, 'error': f'unknown columns: {unknown}'}), 400
+
+            set_cols = list(updates.keys())
+            if not set_cols:
+                return jsonify({'ok': False, 'error': 'no valid columns to update'}), 400
+
+            # SET col=%s, col=%s ...
+            set_clause = ', '.join([f'{c} = %s' for c in set_cols])
+            sql = f'UPDATE {qualify(ENV_TABLE)} SET {set_clause} WHERE env_no = %s'
+            params = [updates[c] for c in set_cols] + [env_no]
+
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                updated = cur.rowcount
+            conn.commit()
+
+        return jsonify({'ok': True, 'updated_columns': set_cols, 'rowcount': updated})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/simulation', methods=['GET', 'POST', 'PUT', 'DELETE'])
+def api_simulation():
+    try:
+        if request.method == 'GET':
+            limit = int(request.args.get('limit', '1000'))
+            limit = max(1, min(limit, 5000))
+            rows = fetch_simul_list(limit=limit)
+            return jsonify({'ok': True, 'items': rows})
+
+        elif request.method == 'POST':
+            # 등록 (simul_id 수동 지정)
+            payload = request.get_json(silent=True) or request.form.to_dict()
+            data = _clean_simul_payload(payload)
+            if not data.get('simul_id'):
+                return jsonify({'ok': False, 'error': 'simul_id is required'}), 400
+
+            with get_pg_conn() as conn:
+                cols_exist = get_table_columns(conn, SIMUL_TABLE)
+                data = _filter_existing_cols(conn, SIMUL_TABLE, data)
+                if not data:
+                    return jsonify({'ok': False, 'error': 'no valid columns in payload'}), 400
+
+                cols = list(data.keys())
+                params = [data[c] for c in cols]
+                placeholders = ['%s'] * len(cols)
+
+                # reg_time 컬럼이 있다면 NOW()로 넣어줌
+                if 'reg_time' in cols_exist:
+                    cols.append('reg_time')
+                    placeholders.append('NOW()')
+
+                sql = f'INSERT INTO {qualify(SIMUL_TABLE)} ({", ".join(cols)}) VALUES ({", ".join(placeholders)}) RETURNING simul_id'
+                with conn.cursor() as cur:
+                    cur.execute(sql, params)
+                    new_id = cur.fetchone()[0]
+                conn.commit()
+
+            return jsonify({'ok': True, 'simul_id': new_id})
+
+        elif request.method == 'PUT':
+            # 수정
+            payload = request.get_json(silent=True) or {}
+            simul_id = payload.get('simul_id', None)
+            if not simul_id:
+                return jsonify({'ok': False, 'error': 'simul_id is required'}), 400
+            simul_id = int(simul_id)
+
+            data = _clean_simul_payload(payload)
+            # simul_id는 SET 대상에서 제외
+            data.pop('simul_id', None)
+
+            with get_pg_conn() as conn:
+                data = _filter_existing_cols(conn, SIMUL_TABLE, data)
+                if not data:
+                    return jsonify({'ok': False, 'error': 'no valid columns in payload'}), 400
+                set_clause = ', '.join([f'{k}=%s' for k in data.keys()])
+                sql = f'UPDATE {qualify(SIMUL_TABLE)} SET {set_clause} WHERE simul_id=%s'
+                with conn.cursor() as cur:
+                    cur.execute(sql, list(data.values()) + [simul_id])
+                    rc = cur.rowcount
+                conn.commit()
+
+            return jsonify({'ok': True, 'rowcount': rc})
+
+        elif request.method == 'DELETE':
+            # 삭제
+            simul_id = request.args.get('simul_id', type=int)
+            if not simul_id:
+                data = request.get_json(silent=True) or {}
+                simul_id = int(data.get('simul_id', 0))
+            if not simul_id:
+                return jsonify({'ok': False, 'error': 'simul_id is required'}), 400
+
+            with get_pg_conn() as conn:
+                sql = f'DELETE FROM {qualify(SIMUL_TABLE)} WHERE simul_id=%s'
+                with conn.cursor() as cur:
+                    cur.execute(sql, (simul_id,))
+                    rc = cur.rowcount
+                conn.commit()
+            return jsonify({'ok': True, 'rowcount': rc})
+
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+# =========[ Pages ]=========
+@app.route('/paramset')
+def paramset_page():
+    # 템플릿 추가
+    return render_template('paramset.html')
+
+# =========[ APIs ]=========
+@app.route('/api/paramset/ids')
+def api_paramset_ids():
+    """set_id 목록(행 수 포함)"""
+    try:
+        with get_pg_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            sql = f'''
+                SELECT set_id, COUNT(*) AS row_count
+                FROM {qualify(PARAM_TABLE)}
+                GROUP BY set_id
+                ORDER BY set_id ASC
+            '''
+            cur.execute(sql)
+            rows = cur.fetchall()
+        return jsonify({'ok': True, 'items': rows})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/paramset/rows')
+def api_paramset_rows():
+    """특정 set_id의 전체 파라메터 행과 총 경우의 수"""
+    set_id = request.args.get('set_id', type=int)
+    if set_id is None:
+        return jsonify({'ok': False, 'error': 'set_id is required'}), 400
+    try:
+        rows, total_cases = _fetch_paramset_rows(set_id)
+        return jsonify({'ok': True, 'items': rows, 'total_cases': total_cases})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/paramset/upsert', methods=['POST'])
+def api_paramset_upsert():
+    """
+    Insert or Update 1 row
+    JSON:
+    {
+      "set_id": 0,
+      "param_no": 3,
+      "param_name": "s1m1_clear_negative_avg_spread",
+      "param_desc": "desc..",
+      "data_type": "float" or "int",
+      "data_min": 1.6,
+      "data_max": 2.4,
+      "data_step_size": 0.1,
+      "is_active": 1
+    }
+    data_cnt는 서버에서 자동 계산/저장
+    """
+    payload = request.get_json(silent=True) or {}
+    required = ['set_id', 'param_no', 'param_name', 'data_type']
+    missing = [k for k in required if k not in payload]
+    if missing:
+        return jsonify({'ok': False, 'error': f'missing: {missing}'}), 400
+
+    set_id      = int(payload['set_id'])
+    param_no    = int(payload['param_no'])
+    param_name  = str(payload.get('param_name') or '').strip()
+    param_desc  = str(payload.get('param_desc') or '').strip() or None
+    data_type   = str(payload.get('data_type') or '').strip().lower()
+    data_min    = payload.get('data_min', None)
+    data_max    = payload.get('data_max', None)
+    data_step   = payload.get('data_step_size', None)
+    is_active   = int(payload.get('is_active', 1))
+
+    if data_type not in ('float', 'int'):
+        return jsonify({'ok': False, 'error': 'data_type must be "float" or "int"'}), 400
+
+    # None 허용하지만, 셋이 다 들어오면 cnt 계산
+    data_cnt = 0
+    if data_min is not None and data_max is not None and data_step is not None:
+        data_cnt = _calc_data_cnt(data_min, data_max, data_step)
+
+    try:
+        with get_pg_conn() as conn, conn.cursor() as cur:
+            sql = f'''
+                INSERT INTO {qualify(PARAM_TABLE)}
+                    (set_id, param_no, param_name, param_desc, data_type,
+                     data_min, data_max, data_step_size, data_cnt, is_active)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (set_id, param_no) DO UPDATE SET
+                    param_name      = EXCLUDED.param_name,
+                    param_desc      = EXCLUDED.param_desc,
+                    data_type       = EXCLUDED.data_type,
+                    data_min        = EXCLUDED.data_min,
+                    data_max        = EXCLUDED.data_max,
+                    data_step_size  = EXCLUDED.data_step_size,
+                    data_cnt        = EXCLUDED.data_cnt,
+                    is_active       = EXCLUDED.is_active
+            '''
+            cur.execute(sql, (
+                set_id, param_no, param_name, param_desc, data_type,
+                data_min, data_max, data_step, data_cnt, is_active
+            ))
+            conn.commit()
+        rows, total_cases = _fetch_paramset_rows(set_id)
+        return jsonify({'ok': True, 'data_cnt': data_cnt, 'total_cases': total_cases, 'items': rows})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/paramset/delete', methods=['DELETE'])
+def api_paramset_delete():
+    set_id   = request.args.get('set_id', type=int)
+    param_no = request.args.get('param_no', type=int)
+    if set_id is None or param_no is None:
+        return jsonify({'ok': False, 'error': 'set_id and param_no are required'}), 400
+    try:
+        with get_pg_conn() as conn, conn.cursor() as cur:
+            sql = f'DELETE FROM {qualify(PARAM_TABLE)} WHERE set_id=%s AND param_no=%s'
+            cur.execute(sql, (set_id, param_no))
+            rc = cur.rowcount
+            conn.commit()
+        rows, total_cases = _fetch_paramset_rows(set_id)
+        return jsonify({'ok': True, 'rowcount': rc, 'items': rows, 'total_cases': total_cases})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+
 # =============================
 # Main
 # =============================
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
 

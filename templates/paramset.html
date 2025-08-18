@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <link rel="stylesheet" href="/static/app.css">
+  <meta charset="UTF-8">
+  <title>Param Set Regist</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; }
+    nav { background:#343a40; padding:10px; display:flex; gap:20px; }
+    nav a { color:#fff; text-decoration:none; font-weight:bold; }
+    nav a:hover { text-decoration:underline; }
+    .container { padding:16px; }
+    .row { display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; }
+    .card { background:#f8f9fa; border-radius:8px; padding:12px; margin-bottom:14px; }
+    .card h3 { margin:4px 0 10px 0; font-size:16px; }
+    .grid { display:grid; grid-template-columns:repeat(6, 1fr); gap:10px; }
+    .grid .col-2 { grid-column: span 2; }
+    .grid .col-3 { grid-column: span 3; }
+    label { font-size:12px; color:#333; display:block; margin-bottom:4px; }
+    input[type="number"], input[type="text"], select {
+      width:100%; padding:6px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px;
+    }
+    input[readonly] { background:#eee; }
+    .btnbar { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
+    button { padding:7px 12px; border-radius:6px; border:1px solid #888; background:#fff; cursor:pointer; }
+    button.primary { background:#2b7cff; color:#fff; border-color:#2b7cff; }
+    button.danger  { background:#e74c3c; color:#fff; border-color:#e74c3c; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { border-bottom:1px solid #e3e3e3; padding:6px 8px; font-size:13px; }
+    tr:hover { background:#f1f5ff; cursor:pointer; }
+    .badge { padding:2px 6px; border-radius:10px; font-size:11px; }
+    .on { background:#d1fae5; color:#065f46; }
+    .off { background:#fee2e2; color:#7f1d1d; }
+    .total { font-weight:bold; color:#222; }
+    .muted { color:#666; font-size:12px; }
+  </style>
+</head>
+<body>
+<nav>
+  <a href="/">Server Monitor</a>
+  <a href="/cuda">Alpha Cuda Simul</a>
+  <a href="/simul">Simulation Regist</a>
+  <a href="/paramset">Parameta Set Regist</a>
+</nav>
+
+<div class="container">
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <label>Set ID 선택</label>
+        <select id="setIdSelect"></select>
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <button id="btnLoad" class="primary">Load</button>
+      </div>
+      <div style="margin-left:auto">
+        <div class="total">
+          총 경우의 수: <span id="totalCases">0</span>
+          <span id="etaWrap" class="muted" style="font-size:18px; font-weight:600; margin-left:6px;"></span>
+        </div>
+        <div class="muted" id="etaNote" style="display:none;font-size:12px; font-weight:600; margin-left:6px;">
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 입력 폼 -->
+  <div class="card">
+    <h3>파라메터 입력 (최대 20개까지)</h3>
+    <div class="grid">
+      <div>
+        <label>set_id</label>
+        <input type="number" id="set_id">
+      </div>
+      <div>
+        <label>param_no</label>
+        <input type="number" id="param_no" min="0">
+      </div>
+      <div class="col-2">
+        <label>param_name</label>
+        <input type="text" id="param_name">
+      </div>
+      <div class="col-2">
+        <label>param_desc</label>
+        <input type="text" id="param_desc">
+      </div>
+
+      <div>
+        <label>data_type</label>
+        <select id="data_type">
+          <option value="float">float</option>
+          <option value="int">int</option>
+        </select>
+      </div>
+      <div>
+        <label>data_min</label>
+        <input type="number" id="data_min" step="0.01">
+      </div>
+      <div>
+        <label>data_max</label>
+        <input type="number" id="data_max" step="0.01">
+      </div>
+      <div>
+        <label>data_step_size</label>
+        <input type="number" id="data_step_size" step="0.01">
+      </div>
+      <div>
+        <label>data_cnt (자동계산)</label>
+        <input type="number" id="data_cnt" readonly>
+      </div>
+      <div>
+        <label>is_active</label>
+        <select id="is_active">
+          <option value="1">1 (활성)</option>
+          <option value="0">0 (비활성)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="btnbar">
+      <button id="btnAdd" class="primary">Add</button>
+      <button id="btnSave" class="primary">Save</button>
+      <button id="btnClear">Clear</button>
+      <button id="btnReload">Reload</button>
+      <button id="btnDelete" class="danger" hidden>Delete</button>
+    </div>
+  </div>
+
+  <!-- 리스트 -->
+  <div class="card">
+    <h3>파라메터 세트 리스트</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>set_id</th>
+          <th>param_no</th>
+          <th>param_name</th>
+          <th>data_type</th>
+          <th>data_min</th>
+          <th>data_max</th>
+          <th>data_step_size</th>
+          <th>data_cnt</th>
+          <th>is_active</th>
+        </tr>
+      </thead>
+      <tbody id="listBody"></tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+// 상단 어딘가(전역) — 레퍼런스 러닝타임
+const BASE_CASES = 272_160;
+const BASE_SEC   = 27 + 0.060; // 27s 60ms = 27.06s
+
+function toInt(v, def=0){ const n = parseInt(v,10); return isNaN(n)?def:n; }
+function toNum(v){ const n = Number(v); return isNaN(n)?null:n; }
+
+// JS용 data_cnt 계산 (UI 미리보기용; 저장 시 서버가 최종 재계산)
+function calcCnt(minv, maxv, step){
+  if (minv == null || maxv == null || step == null) return 0;
+  if (step <= 0 || minv > maxv) return 0;
+  const n = (maxv - minv) / step + 1e-12; // 부동소수 오차 방어
+  return Math.floor(n) + 1;
+}
+
+function setForm(row) {
+  $('set_id').value        = row.set_id ?? '';
+  $('param_no').value      = row.param_no ?? '';
+  $('param_name').value    = row.param_name ?? '';
+  $('param_desc').value    = row.param_desc ?? '';
+  $('data_type').value     = row.data_type ?? 'float';
+  $('data_min').value      = row.data_min ?? '';
+  $('data_max').value      = row.data_max ?? '';
+  $('data_step_size').value= row.data_step_size ?? '';
+  $('data_cnt').value      = row.data_cnt ?? '';
+  $('is_active').value     = row.is_active ?? 1;
+}
+
+function clearForm(keepSetId=true){
+  const setId = $('set_id').value;
+  setForm({
+    set_id: keepSetId ? setId : '',
+    param_no: '',
+    param_name: '',
+    param_desc: '',
+    data_type: 'float',
+    data_min: '',
+    data_max: '',
+    data_step_size: '',
+    data_cnt: '',
+    is_active: 1
+  });
+}
+
+async function loadSetIds(){
+  const res = await fetch('/api/paramset/ids');
+  const js = await res.json();
+  const sel = $('setIdSelect');
+  sel.innerHTML = '';
+  if (js.ok && js.items){
+    js.items.forEach(r=>{
+      const opt = document.createElement('option');
+      opt.value = r.set_id;
+      opt.textContent = `${r.set_id} (${r.row_count})`;
+      sel.appendChild(opt);
+    });
+  }
+}
+
+
+// 초 → "00일 00시 00분 00초"
+function fmtDurationKOR(sec){
+  const s = Math.max(0, Math.round(sec)); // 초 단위 반올림
+  const days = Math.floor(s / 86400);
+  const hRem = s % 86400;
+  const hours = Math.floor(hRem / 3600);
+  const mRem = hRem % 3600;
+  const mins = Math.floor(mRem / 60);
+  const secs = mRem % 60;
+  const pad2 = (n) => String(n).padStart(2, '0');
+  return `${pad2(days)}일 ${pad2(hours)}시 ${pad2(mins)}분 ${pad2(secs)}초`;
+}
+
+// 초 → "일 시 분 초" (0 단위 생략, 최소 '초'는 표시)
+function fmtDurationCompactKOR(sec){
+  let s = Math.max(0, Math.round(sec));  // 초 단위 반올림
+  const parts = [];
+  const days  = Math.floor(s / 86400); s %= 86400;
+  const hours = Math.floor(s / 3600);  s %= 3600;
+  const mins  = Math.floor(s / 60);    s %= 60;
+  const secs  = s;
+
+  if (days)  parts.push(`${days}일`);
+  if (hours) parts.push(`${hours}시`);
+  if (mins)  parts.push(`${mins}분`);
+  if (secs || parts.length === 0) parts.push(`${secs}초`); // 전부 0이면 '0초'
+
+  return parts.join(' ');
+}
+
+
+function updateTotalAndEta(total){
+  const totalNum = Number(total || 0);
+  const etaSec   = (totalNum / BASE_CASES) * BASE_SEC;
+  document.getElementById('totalCases').textContent = totalNum.toLocaleString('ko-KR');
+  document.getElementById('etaWrap').textContent    = totalNum ? ` (10년 기준 예상: ${fmtDurationCompactKOR(etaSec)})` : '';
+  document.getElementById('etaNote').style.display  = totalNum ? '' : 'none';
+}
+
+
+async function loadRows(setId){
+  const res = await fetch(`/api/paramset/rows?set_id=${setId}`);
+  const js  = await res.json();
+  const tbody = $('listBody');
+  tbody.innerHTML = '';
+
+  if (js.ok && js.items){
+    // ✅ 총 경우의 수 + ETA 같이 갱신
+    updateTotalAndEta(js.total_cases);
+
+    js.items.forEach(r=>{
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${r.set_id}</td>
+        <td>${r.param_no}</td>
+        <td>${r.param_name ?? ''}</td>
+        <td>${r.data_type ?? ''}</td>
+        <td>${r.data_min ?? ''}</td>
+        <td>${r.data_max ?? ''}</td>
+        <td>${r.data_step_size ?? ''}</td>
+        <td>${r.data_cnt ?? ''}</td>
+        <td><span class="badge ${r.is_active==1?'on':'off'}">${r.is_active==1?'ON':'OFF'}</span></td>
+      `;
+      tr.addEventListener('click', ()=> setForm(r));
+      tbody.appendChild(tr);
+    });
+  } else {
+    updateTotalAndEta(0);
+  }
+}
+
+
+
+
+
+async function saveRow(){
+  const payload = {
+    set_id:        toInt($('set_id').value),
+    param_no:      toInt($('param_no').value),
+    param_name:    $('param_name').value.trim(),
+    param_desc:    $('param_desc').value.trim(),
+    data_type:     $('data_type').value,
+    data_min:      toNum($('data_min').value),
+    data_max:      toNum($('data_max').value),
+    data_step_size:toNum($('data_step_size').value),
+    is_active:     toInt($('is_active').value, 1)
+  };
+  const res = await fetch('/api/paramset/upsert', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  });
+  const js = await res.json();
+  if (!js.ok){
+    alert('Save failed: ' + js.error);
+    return;
+  }
+  $('data_cnt').value = js.data_cnt ?? '';
+  await loadRows(payload.set_id);
+}
+
+async function deleteRow(){
+  //const set_id = toInt($('set_id').value);
+  //const param_no = toInt($('param_no').value);
+  //if (!set_id || isNaN(param_no)){ alert('set_id/param_no 필요'); return; }
+  //if (!confirm(`Delete (set_id=${set_id}, param_no=${param_no}) ?`)) return;
+  //const res = await fetch(`/api/paramset/delete?set_id=${set_id}&param_no=${param_no}`, { method:'DELETE' });
+  //const js = await res.json();
+  //if (!js.ok){ alert('Delete failed: ' + js.error); return; }
+  //clearForm(true);
+  //await loadRows(set_id);
+}
+
+// UI events
+['data_min','data_max','data_step_size'].forEach(id=>{
+  $(id).addEventListener('input', ()=>{
+    const c = calcCnt(toNum($('data_min').value), toNum($('data_max').value), toNum($('data_step_size').value));
+    $('data_cnt').value = c || '';
+  });
+});
+$('data_type').addEventListener('change', ()=>{
+  const t = $('data_type').value;
+  const step = (t==='int') ? 1 : 0.01;
+  $('data_min').step = step;
+  $('data_max').step = step;
+  $('data_step_size').step = step;
+});
+
+$('btnAdd').addEventListener('click', ()=>{ clearForm(true); $('param_no').focus(); });
+$('btnSave').addEventListener('click', saveRow);
+$('btnClear').addEventListener('click', ()=> clearForm(false));
+$('btnReload').addEventListener('click', ()=> {
+  const sid = toInt($('set_id').value || $('setIdSelect').value);
+  if (sid) loadRows(sid);
+});
+$('btnDelete').addEventListener('click', deleteRow);
+
+$('btnLoad').addEventListener('click', ()=>{
+  const sid = toInt($('setIdSelect').value);
+  $('set_id').value = sid;
+  loadRows(sid);
+});
+
+// init
+(async function init(){
+  await loadSetIds();
+  // 기본 선택 set_id로 로드
+  const sidOpt = $('setIdSelect').value;
+  if (sidOpt){
+    $('set_id').value = sidOpt;
+    await loadRows(parseInt(sidOpt,10));
+  }
+})();
+</script>
+
+</body>
+</html>
+

@@ -28,6 +28,7 @@ DB_SCHEMA = os.getenv('ALPHA_DB_SCHEMA', 'alpha')
 # 테이블명 커스터마이즈 가능
 SIMUL_TABLE  = os.getenv('ALPHA_SIMUL_TABLE',  'alpha_cuda_simul')
 RESULT_TABLE = os.getenv('ALPHA_RESULT_TABLE', 'cuda_simul_result')
+PARAM_TABLE = os.getenv('ALPHA_PARAM_TABLE',   'simul_param_set')
 
 ENV_TABLE = os.getenv('ALPHA_ENV_TABLE', 'alpha_env')
 APPLY_ENABLED = os.getenv('ALPHA_ENABLE_APPLY', '1')
@@ -51,7 +52,7 @@ SIMUL_LIST_EXPECTED = [
     'reg_time', 'simul_from_date', 'simul_to_date',
     'param_set_id',              # NEW
     'is_active',                 # NEW
-    'status'
+    'status', 'simul_candle', 'simul_desc', 'main_simul_id', 'main_top_rank'
 ]
 
 # 쓰기(등록/수정) 허용 컬럼 (요청한 입력 항목)
@@ -61,6 +62,53 @@ SIMUL_WRITE_FIELDS = [
     'simul_type', 'main_simul_id', 'main_top_rank', 'param_set_id',
     'reason'
 ]
+
+
+
+# =========[ helpers: Decimal cnt / total cases ]=========
+from decimal import Decimal, getcontext
+getcontext().prec = 28
+
+def _calc_data_cnt(minv, maxv, step) -> int:
+    """[data_cnt] = floor((max - min) / step) + 1, Decimal로 안전 계산"""
+    if minv is None or maxv is None or step is None:
+        return 0
+    a = Decimal(str(minv))
+    b = Decimal(str(maxv))
+    s = Decimal(str(step))
+    if s <= 0 or a > b:
+        return 0
+    # 0.1, 0.01 등 이진표현 오차 방지 위해 Decimal 사용
+    n = (b - a) / s
+    # 음수/실수 입력을 방어적으로 보정
+    n_int = int(n.to_integral_value(rounding='ROUND_FLOOR'))
+    return n_int + 1
+
+def _fetch_paramset_rows(set_id: int):
+    with get_pg_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+        sql = f'''
+            SELECT set_id, param_no, param_name, param_desc, data_type,
+                   data_min, data_max, data_step_size, data_cnt, is_active
+            FROM {qualify(PARAM_TABLE)}
+            WHERE set_id = %s
+            ORDER BY param_no ASC
+        '''
+        cur.execute(sql, (set_id,))
+        rows = cur.fetchall()
+
+    # total_cases = 활성화된 data_cnt의 곱
+    total_cases = 0
+    prod = 1
+    active_any = False
+    for r in rows:
+        if int(r.get('is_active', 0)) == 1:
+            c = int(r.get('data_cnt') or 0)
+            active_any = True
+            prod *= max(c, 0)
+    if active_any:
+        total_cases = prod
+    return rows, total_cases
+
 
 # ---- 날짜 파서 (timestamp 컬럼용) ----
 from datetime import datetime
@@ -264,6 +312,7 @@ def fetch_simul_detail(simul_id: int, limit=500):
 
         select_list = ', '.join(sel_min + select_opt) if select_opt else ', '.join(sel_min)
 
+        # 승율 정렬
         sql = f'''
             SELECT {select_list}
             FROM {qualify(RESULT_TABLE)}
@@ -277,9 +326,22 @@ def fetch_simul_detail(simul_id: int, limit=500):
                 gid ASC
             LIMIT %s
         '''
+
+        # 수익포인트 정렬
+        sql2 = f"""
+            SELECT {select_list}
+            FROM {qualify(RESULT_TABLE)}
+            WHERE simul_id = %s
+            ORDER BY
+                (total_profit)::double precision DESC NULLS LAST,
+                CASE WHEN trades IS NOT NULL AND trades > 0 THEN wins::float / trades ELSE -1 END DESC,
+                gid ASC
+            LIMIT %s
+        """
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(sql, (simul_id, limit))
+            cur.execute(sql2, (simul_id, limit))
             rows = cur.fetchall()
+
 
     # 후처리: Decimal → float, win_rate, param_summary
     for r in rows:
@@ -303,6 +365,150 @@ def fetch_simul_detail(simul_id: int, limit=500):
 
     return rows
 
+
+# =============================
+# Detail query (filters + pagination)
+# =============================
+def _resolve_result_columns(cols):
+    """Return tuple: (gid_col, wins_col, trades_col, profit_expr)
+    profit_expr is a dynamic SQL snippet using existing profit-like columns.
+    """
+    # gid / wins / trades: pick first existing from canonical options
+    def first_present(options):
+        for c in options:
+            if c in cols:
+                return c
+        return None
+
+    gid_col    = first_present(CANONICAL_MIN['gid'])
+    wins_col   = first_present(CANONICAL_MIN['wins'])
+    trades_col = first_present(CANONICAL_MIN['trades'])
+
+    # profit columns that may exist
+    profit_candidates = [c for c in ('total_profit', 'total_profit_ptr', 'profit_ptr') if c in cols]
+    if profit_candidates:
+        if len(profit_candidates) == 1:
+            profit_expr = f"({profit_candidates[0]})::double precision"
+        else:
+            joined = ", ".join(profit_candidates)
+            profit_expr = f"COALESCE({joined})::double precision"
+    else:
+        # No profit-like columns; use NULL
+        profit_expr = "NULL::double precision"
+
+    return gid_col, wins_col, trades_col, profit_expr
+
+
+def fetch_simul_detail_paged(simul_id: int, *, page:int=1, page_size:int=200,
+                             win_min=None, win_max=None,
+                             profit_min=None, profit_max=None,
+                             trades_min=None, trades_max=None,
+                             sort_by:str='profit', sort_dir:str='desc'):
+    """
+    Return dict: {items: [...], total: N, page: x, page_size: y, pages: k}
+    - sort_by in {'profit','win_rate'}
+    - sort_dir in {'asc','desc'}
+    """
+    if page < 1: page = 1
+    page_size = max(1, min(page_size, 5000))
+    sort_by = (sort_by or 'profit').lower()
+    if sort_by not in ('profit','win_rate'):
+        sort_by = 'profit'
+    sort_dir = (sort_dir or 'desc').lower()
+    if sort_dir not in ('asc','desc'):
+        sort_dir = 'desc'
+
+    with get_pg_conn() as conn:
+        cols = get_table_columns(conn, RESULT_TABLE)
+        gid_col, wins_col, trades_col, profit_expr = _resolve_result_columns(cols)
+        if not (gid_col and wins_col and trades_col):
+            raise RuntimeError(f"[{DB_SCHEMA}.{RESULT_TABLE}] missing required gid/wins/trades columns; existing={sorted(list(cols))}")
+
+        # Build select columns (same as legacy + computed win_rate)
+        sel_min = [
+            f"{gid_col} AS gid",
+            f"{wins_col} AS wins",
+            f"{trades_col} AS trades",
+            f"{profit_expr} AS total_profit"
+        ]
+        # add p{i}_name/val if present
+        for i in range(1, 21):
+            nk, vk = f"p{i}_name", f"p{i}_val"
+            if nk in cols: sel_min.append(nk)
+            if vk in cols: sel_min.append(vk)
+
+        # computed win_rate expression
+        win_rate_expr = f"""CASE
+            WHEN {trades_col} IS NOT NULL AND {trades_col} > 0
+            THEN ({wins_col}::float / NULLIF({trades_col},0)) * 100.0
+            ELSE NULL
+        END"""
+
+        # WHERE
+        where = [ "simul_id = %s" ]
+        params = [simul_id]
+
+        if trades_min is not None:
+            where.append(f"{trades_col} >= %s"); params.append(int(trades_min))
+        if trades_max is not None:
+            where.append(f"{trades_col} <= %s"); params.append(int(trades_max))
+
+        if profit_min is not None:
+            where.append(f"{profit_expr} >= %s"); params.append(float(profit_min))
+        if profit_max is not None:
+            where.append(f"{profit_expr} <= %s"); params.append(float(profit_max))
+
+        if win_min is not None:
+            where.append(f"({win_rate_expr}) >= %s"); params.append(float(win_min))
+        if win_max is not None:
+            where.append(f"({win_rate_expr}) <= %s"); params.append(float(win_max))
+
+        where_sql = " AND ".join(where)
+
+        # ORDER
+        if sort_by == 'win_rate':
+            order_sql = f"({win_rate_expr}) {sort_dir.upper()} NULLS LAST, {profit_expr} DESC NULLS LAST, {gid_col} ASC"
+        else:
+            order_sql = f"{profit_expr} {sort_dir.upper()} NULLS LAST, ({win_rate_expr}) DESC NULLS LAST, {gid_col} ASC"
+
+        # COUNT
+        with conn.cursor() as cur:
+            sql_cnt = f"SELECT COUNT(*) FROM {qualify(RESULT_TABLE)} WHERE {where_sql}"
+            cur.execute(sql_cnt, params)
+            total = int(cur.fetchone()[0])
+
+        # SELECT page
+        offset = (page-1)*page_size
+        select_cols = ", ".join(sel_min + [f"({win_rate_expr}) AS win_rate"])
+        sql = f"""
+            SELECT {select_cols}
+            FROM {qualify(RESULT_TABLE)}
+            WHERE {where_sql}
+            ORDER BY {order_sql}
+            LIMIT %s OFFSET %s
+        """
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(sql, params + [page_size, offset])
+            rows = cur.fetchall()
+
+    # Post-process: convert Decimal, build param_summary like legacy
+    from decimal import Decimal as _D
+    for r in rows:
+        for k, v in list(r.items()):
+            if isinstance(v, _D):
+                r[k] = float(v)
+        # param_summary
+        params_list = []
+        for i in range(1, 21):
+            nk, vk = f"p{i}_name", f"p{i}_val"
+            name = r.get(nk, None)
+            val  = r.get(vk, None)
+            if name is not None and str(name).strip() != '' and val is not None:
+                params_list.append(f"{name}={val}")
+        r['param_summary'] = "; ".join(params_list) if params_list else None
+
+    pages = (total + page_size - 1) // page_size if total else 0
+    return {'items': rows, 'total': total, 'page': page, 'page_size': page_size, 'pages': pages}
 # =============================
 # Pages
 # =============================
@@ -325,14 +531,6 @@ def cuda_detail_page(simul_id: int):
 @app.route('/simul')
 def simul_regist_page():
     return render_template('simul_regist.html')
-
-# (선택) 파라메터셋 등록 페이지도 쓸 경우
-@app.route('/paramset')
-def paramset_page():
-    # templates/paramset.html 이 있다면 아래로 교체:
-    # return render_template('paramset.html')
-    return '<html><body><nav><a href="/">Server Monitor</a> | <a href="/cuda">Alpha Cuda Simul</a> | <a href="/simul">Simulation Regist</a> | <a href="/paramset">Parameta Set Regist</a></nav><div style="padding:16px"><h3>Parameta Set Regist (WIP)</h3></div></body></html>'
-
 
 # =============================
 # APIs
@@ -362,16 +560,39 @@ def api_simul_list():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/api/simul_detail')
 def api_simul_detail():
     simul_id = request.args.get('simul_id', type=int)
     if simul_id is None or simul_id < 0:
         return jsonify({'error': 'simul_id is required (> 0)'}), 400
-    limit = request.args.get('limit', default=500, type=int)
+    # Back-compat: allow old 'limit' as page_size when no explicit page_size
+    limit_legacy = request.args.get('limit', type=int)
+    page        = request.args.get('page', type=int) or 1
+    page_size   = request.args.get('page_size', type=int) or (limit_legacy or 200)
+
+    # Range filters
+    win_min     = request.args.get('win_min', type=float)
+    win_max     = request.args.get('win_max', type=float)
+    profit_min  = request.args.get('profit_min', type=float)
+    profit_max  = request.args.get('profit_max', type=float)
+    trades_min  = request.args.get('trades_min', type=int)
+    trades_max  = request.args.get('trades_max', type=int)
+
+    # Sorting
+    sort_by     = (request.args.get('sort') or 'profit')
+    sort_dir    = (request.args.get('dir')  or 'desc')
+
     try:
-        limit = max(1, min(limit, 5000))
-        rows = fetch_simul_detail(simul_id, limit=limit)
-        return jsonify({'items': rows})
+        data = fetch_simul_detail_paged(
+            simul_id,
+            page=page, page_size=page_size,
+            win_min=win_min, win_max=win_max,
+            profit_min=profit_min, profit_max=profit_max,
+            trades_min=trades_min, trades_max=trades_max,
+            sort_by=sort_by, sort_dir=sort_dir
+        )
+        return jsonify(data)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -520,10 +741,134 @@ def api_simulation():
         return jsonify({'ok': False, 'error': str(e)}), 500
 
 
+# =========[ Pages ]=========
+@app.route('/paramset')
+def paramset_page():
+    # 템플릿 추가
+    return render_template('paramset.html')
+
+# =========[ APIs ]=========
+@app.route('/api/paramset/ids')
+def api_paramset_ids():
+    """set_id 목록(행 수 포함)"""
+    try:
+        with get_pg_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            sql = f'''
+                SELECT set_id, COUNT(*) AS row_count
+                FROM {qualify(PARAM_TABLE)}
+                GROUP BY set_id
+                ORDER BY set_id ASC
+            '''
+            cur.execute(sql)
+            rows = cur.fetchall()
+        return jsonify({'ok': True, 'items': rows})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/paramset/rows')
+def api_paramset_rows():
+    """특정 set_id의 전체 파라메터 행과 총 경우의 수"""
+    set_id = request.args.get('set_id', type=int)
+    if set_id is None:
+        return jsonify({'ok': False, 'error': 'set_id is required'}), 400
+    try:
+        rows, total_cases = _fetch_paramset_rows(set_id)
+        return jsonify({'ok': True, 'items': rows, 'total_cases': total_cases})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/paramset/upsert', methods=['POST'])
+def api_paramset_upsert():
+    """
+    Insert or Update 1 row
+    JSON:
+    {
+      "set_id": 0,
+      "param_no": 3,
+      "param_name": "s1m1_clear_negative_avg_spread",
+      "param_desc": "desc..",
+      "data_type": "float" or "int",
+      "data_min": 1.6,
+      "data_max": 2.4,
+      "data_step_size": 0.1,
+      "is_active": 1
+    }
+    data_cnt는 서버에서 자동 계산/저장
+    """
+    payload = request.get_json(silent=True) or {}
+    required = ['set_id', 'param_no', 'param_name', 'data_type']
+    missing = [k for k in required if k not in payload]
+    if missing:
+        return jsonify({'ok': False, 'error': f'missing: {missing}'}), 400
+
+    set_id      = int(payload['set_id'])
+    param_no    = int(payload['param_no'])
+    param_name  = str(payload.get('param_name') or '').strip()
+    param_desc  = str(payload.get('param_desc') or '').strip() or None
+    data_type   = str(payload.get('data_type') or '').strip().lower()
+    data_min    = payload.get('data_min', None)
+    data_max    = payload.get('data_max', None)
+    data_step   = payload.get('data_step_size', None)
+    is_active   = int(payload.get('is_active', 1))
+
+    if data_type not in ('float', 'int'):
+        return jsonify({'ok': False, 'error': 'data_type must be "float" or "int"'}), 400
+
+    # None 허용하지만, 셋이 다 들어오면 cnt 계산
+    data_cnt = 0
+    if data_min is not None and data_max is not None and data_step is not None:
+        data_cnt = _calc_data_cnt(data_min, data_max, data_step)
+
+    try:
+        with get_pg_conn() as conn, conn.cursor() as cur:
+            sql = f'''
+                INSERT INTO {qualify(PARAM_TABLE)}
+                    (set_id, param_no, param_name, param_desc, data_type,
+                     data_min, data_max, data_step_size, data_cnt, is_active)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (set_id, param_no) DO UPDATE SET
+                    param_name      = EXCLUDED.param_name,
+                    param_desc      = EXCLUDED.param_desc,
+                    data_type       = EXCLUDED.data_type,
+                    data_min        = EXCLUDED.data_min,
+                    data_max        = EXCLUDED.data_max,
+                    data_step_size  = EXCLUDED.data_step_size,
+                    data_cnt        = EXCLUDED.data_cnt,
+                    is_active       = EXCLUDED.is_active
+            '''
+            cur.execute(sql, (
+                set_id, param_no, param_name, param_desc, data_type,
+                data_min, data_max, data_step, data_cnt, is_active
+            ))
+            conn.commit()
+        rows, total_cases = _fetch_paramset_rows(set_id)
+        return jsonify({'ok': True, 'data_cnt': data_cnt, 'total_cases': total_cases, 'items': rows})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/paramset/delete', methods=['DELETE'])
+def api_paramset_delete():
+    set_id   = request.args.get('set_id', type=int)
+    param_no = request.args.get('param_no', type=int)
+    if set_id is None or param_no is None:
+        return jsonify({'ok': False, 'error': 'set_id and param_no are required'}), 400
+    try:
+        with get_pg_conn() as conn, conn.cursor() as cur:
+            sql = f'DELETE FROM {qualify(PARAM_TABLE)} WHERE set_id=%s AND param_no=%s'
+            cur.execute(sql, (set_id, param_no))
+            rc = cur.rowcount
+            conn.commit()
+        rows, total_cases = _fetch_paramset_rows(set_id)
+        return jsonify({'ok': True, 'rowcount': rc, 'items': rows, 'total_cases': total_cases})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
 
 # =============================
 # Main
 # =============================
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+
 

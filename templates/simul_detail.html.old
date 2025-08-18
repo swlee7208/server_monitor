@@ -25,8 +25,6 @@
     .sortable::after { content: ' ⬍'; opacity: .4; }
     .sortable.sort-asc::after { content: ' ▲'; opacity: .8; }
     .sortable.sort-desc::after { content: ' ▼'; opacity: .8; }
-
-    .disabled-btn { opacity: .5; pointer-events: none; }
   </style>
 </head>
 <body>
@@ -59,30 +57,7 @@
     </label>
     <button id="reloadBtn">Reload</button>
     <span id="status" class="muted"></span>
-
-  <div class="toolbar" id="rangeBar">
-    <label>Win Rate(%)&nbsp;
-      <input type="number" id="winMin" style="width:80px;" placeholder="min"> ~
-      <input type="number" id="winMax" style="width:80px;" placeholder="max">
-    </label>
-    <label>Profit&nbsp;
-      <input type="number" id="profitMin" style="width:100px;" placeholder="min"> ~
-      <input type="number" id="profitMax" style="width:100px;" placeholder="max">
-    </label>
-    <label>Trade cnt&nbsp;
-      <input type="number" id="tradesMin" style="width:100px;" placeholder="min"> ~
-      <input type="number" id="tradesMax" style="width:100px;" placeholder="max">
-    </label>
-
-    <div style="flex:1"></div>
-
-    <label>Page:
-      <input type="number" id="page" value="1" style="width:70px;">
-    </label>
-    <button id="prevPageBtn">Prev</button>
-    <button id="nextPageBtn">Next</button>
   </div>
-</div>
 
   <table id="detailTable">
     <thead>
@@ -123,62 +98,6 @@ function num(v, fallback = Number.NEGATIVE_INFINITY){
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 }
-
-// ---------- URL state helpers ----------
-function loadStateFromURL(){
-  const qp = new URLSearchParams(location.search);
-  const setNum = (id, key) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    const v = qp.get(key);
-    if (v !== null) el.value = v;
-  };
-  setNum('limit','page_size'); // reuse as page_size
-  setNum('page','page');
-  setNum('winMin','win_min');
-  setNum('winMax','win_max');
-  setNum('profitMin','profit_min');
-  setNum('profitMax','profit_max');
-  setNum('tradesMin','trades_min');
-  setNum('tradesMax','trades_max');
-  const filter = qp.get('filter');
-  if (filter !== null) document.getElementById('filter').value = filter;
-  const envNo = qp.get('env_no');
-  if (envNo !== null) document.getElementById('envNo').value = envNo;
-
-  // sort
-  const s = qp.get('sort'); const d = qp.get('dir');
-  if (s) sortKey = (s === 'win_rate' ? 'win_rate' : 'profit');
-  if (d) sortDir = (d === 'asc' ? 'asc' : 'desc');
-  updateHeaderSortUI();
-}
-
-function saveStateToURL(){
-  const qp = new URLSearchParams();
-  qp.set('simul_id', String(simulId));
-  qp.set('page_size', document.getElementById('limit').value);
-  qp.set('page', document.getElementById('page').value);
-  const wmin = document.getElementById('winMin').value.trim();
-  const wmax = document.getElementById('winMax').value.trim();
-  const pmin = document.getElementById('profitMin').value.trim();
-  const pmax = document.getElementById('profitMax').value.trim();
-  const tmin = document.getElementById('tradesMin').value.trim();
-  const tmax = document.getElementById('tradesMax').value.trim();
-  if (wmin) qp.set('win_min', wmin);
-  if (wmax) qp.set('win_max', wmax);
-  if (pmin) qp.set('profit_min', pmin);
-  if (pmax) qp.set('profit_max', pmax);
-  if (tmin) qp.set('trades_min', tmin);
-  if (tmax) qp.set('trades_max', tmax);
-  const f = document.getElementById('filter').value.trim();
-  if (f) qp.set('filter', f);
-  const envNo = document.getElementById('envNo').value.trim();
-  if (envNo) qp.set('env_no', envNo);
-  qp.set('sort', sortKey === 'win_rate' ? 'win_rate' : 'profit');
-  qp.set('dir', sortDir === 'asc' ? 'asc' : 'desc');
-  history.replaceState(null, '', '?' + qp.toString());
-}
-
 function getWinRate(r){
   if (r.win_rate != null) return num(r.win_rate, -1);
   const wins = num(r.wins ?? r.win_cnt, 0);
@@ -339,29 +258,8 @@ function buildUpdateSQL(item, envNo){
 }
 
 
-async function loadDetail(){
-  const qp = new URLSearchParams();
-  qp.set('simul_id', String(simulId));
-  qp.set('page', document.getElementById('page').value || '1');
-  qp.set('page_size', document.getElementById('limit').value || '200');
-  const wmin = document.getElementById('winMin').value.trim();
-  const wmax = document.getElementById('winMax').value.trim();
-  const pmin = document.getElementById('profitMin').value.trim();
-  const pmax = document.getElementById('profitMax').value.trim();
-  const tmin = document.getElementById('tradesMin').value.trim();
-  const tmax = document.getElementById('tradesMax').value.trim();
-  if (wmin) qp.set('win_min', wmin);
-  if (wmax) qp.set('win_max', wmax);
-  if (pmin) qp.set('profit_min', pmin);
-  if (pmax) qp.set('profit_max', pmax);
-  if (tmin) qp.set('trades_min', tmin);
-  if (tmax) qp.set('trades_max', tmax);
-
-  // sorting server-side
-  qp.set('sort', sortKey === 'win_rate' ? 'win_rate' : 'profit');
-  qp.set('dir', sortDir === 'asc' ? 'asc' : 'desc');
-
-  const res = await fetch('/api/simul_detail?' + qp.toString());
+async function loadDetail(limit){
+  const res = await fetch('/api/simul_detail?simul_id=' + simulId + '&limit=' + limit);
   if (!res.ok){ throw new Error(await res.text() || ('HTTP ' + res.status)); }
   return await res.json();
 }
@@ -406,7 +304,8 @@ function renderTable(items, token){
 
   const filtered = items.filter(r => matchFilter(r, token));
 
-  //// (server-side sorting)
+  //filtered.sort((a, b) => {
+    //const wa = (a.win_rate ?? -1), wb = (b.win_rate ?? -1);
     //if (wb !== wa) return wb - wa;
     //const pa = (a.total_profit ?? a.total_profit_ptr ?? a.profit_ptr ?? -1);
     //const pb = (b.total_profit ?? b.total_profit_ptr ?? b.profit_ptr ?? -1);
@@ -493,21 +392,16 @@ function renderTable(items, token){
 }
 
 async function reload(){
+  const limitSel = document.getElementById('limit');
+  const filterInput = document.getElementById('filter');
+  const limit = parseInt(limitSel.value, 10);
   const status = document.getElementById('status');
   status.textContent = 'Loading...';
   try{
-    saveStateToURL();
-    const data = await loadDetail();
+    const data = await loadDetail(limit);
     const items = data.items || [];
     window.__detailCache = items;
-    window.__total = data.total || 0;
-    window.__pages = data.pages || 0;
-    renderTable(items, document.getElementById('filter').value.trim());
-    const page = Number(document.getElementById('page').value || '1');
-    const ps   = Number(document.getElementById('limit').value || '200');
-    status.textContent = `Page ${page}/${window.__pages || 0} • Rows on page: ${items.length} • Total: ${window.__total}`;
-    document.getElementById('prevPageBtn').classList.toggle('disabled-btn', page <= 1);
-    document.getElementById('nextPageBtn').classList.toggle('disabled-btn', window.__pages && page >= window.__pages);
+    renderTable(items, filterInput.value.trim());
   }catch(err){
     status.textContent = 'Error: ' + err.message;
     console.error(err);
@@ -620,26 +514,6 @@ applyBtn.addEventListener('click', async () => {
 
 
 
-
-// ---- pager & inputs ----
-document.getElementById('prevPageBtn').addEventListener('click', () => {
-  const pageEl = document.getElementById('page');
-  let p = parseInt(pageEl.value||'1',10);
-  if (p > 1){ pageEl.value = String(p-1); reload(); }
-});
-document.getElementById('nextPageBtn').addEventListener('click', () => {
-  const pageEl = document.getElementById('page');
-  let p = parseInt(pageEl.value||'1',10);
-  const maxp = window.__pages || (p+1);
-  if (p < maxp){ pageEl.value = String(p+1); reload(); }
-});
-['page','limit','winMin','winMax','profitMin','profitMax','tradesMin','tradesMax'].forEach(id => {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.addEventListener('change', () => reload());
-  el.addEventListener('keydown', (e) => { if (e.key === 'Enter') reload(); });
-});
-
 document.getElementById('reloadBtn').addEventListener('click', reload);
 document.getElementById('filter').addEventListener('input', () => {
   const items = window.__detailCache || [];
@@ -656,7 +530,7 @@ document.getElementById('closeSqlBtn').addEventListener('click', () => {
   else dlg.removeAttribute('open');
 });
 
-//(async () => { loadStateFromURL(); try{ await reload(); } catch(e){ document.getElementById('status').textContent = 'Error: ' + e.message; }})();
+//(async () => { try{ await reload(); } catch(e){ document.getElementById('status').textContent = 'Error: ' + e.message; }})();
 (async () => {
   try {
     await reload();           // 데이터 로드 + 렌더
@@ -673,5 +547,4 @@ document.getElementById('closeSqlBtn').addEventListener('click', () => {
 </script>
 </body>
 </html>
-
 

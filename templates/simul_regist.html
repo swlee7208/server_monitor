@@ -4,21 +4,37 @@
   <meta charset="UTF-8">
   <title>Simulation Regist</title>
   <style>
-    body { font-family: Arial, sans-serif; margin:0; }
+    body { font-family: Arial, sans-serif; margin: 0; }
     nav { background:#343a40; padding:10px; display:flex; gap:20px; }
     nav a { color:#fff; text-decoration:none; font-weight:bold; }
     nav a:hover { text-decoration:underline; }
-    .container { padding:20px; }
-    .form-row { display:grid; grid-template-columns: 160px 1fr 160px 1fr; gap:8px 12px; align-items:center; }
-    .form-row input, .form-row select, .form-row textarea { padding:6px 8px; }
-    .form-row textarea { height:60px; resize:vertical; }
-    .btns { margin:12px 0; display:flex; gap:10px; flex-wrap:wrap; }
-    button { padding:6px 12px; }
-    table { border-collapse: collapse; width:100%; margin-top:12px; }
-    th, td { border:1px solid #ccc; padding:6px 8px; font-size:13px; }
-    tr:hover { background:#f5f7fa; cursor:pointer; }
-    .small { font-size:12px; color:#333; }
+    .container { padding:16px; }
+    .row { display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; }
+    .card { background:#f8f9fa; border-radius:8px; padding:12px; margin-bottom:14px; }
+    .card h3 { margin:4px 0 10px 0; font-size:16px; }
+    .grid { display:grid; grid-template-columns:repeat(6, 1fr); gap:10px; }
+    .grid .col-2 { grid-column: span 2; }
+    .grid .col-3 { grid-column: span 3; }
+    label { font-size:12px; color:#333; display:block; margin-bottom:4px; }
+    input[type="number"], input[type="text"], select {
+      width:100%; padding:6px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px;
+    }
+    input[readonly] { background:#eee; }
+    .btnbar { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
+    button { padding:7px 12px; border-radius:6px; border:1px solid #888; background:#fff; cursor:pointer; }
+    button.primary { background:#2b7cff; color:#fff; border-color:#2b7cff; }
+    button.danger  { background:#e74c3c; color:#fff; border-color:#e74c3c; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { border-bottom:1px solid #e3e3e3; padding:6px 8px; font-size:13px; }
+    tr:hover { background:#f1f5ff; cursor:pointer; }
+    .badge { padding:2px 6px; border-radius:10px; font-size:11px; }
+    .on { background:#d1fae5; color:#065f46; }
+    .off { background:#fee2e2; color:#7f1d1d; }
+    .total { font-weight:bold; color:#222; }
+    .muted { color:#666; font-size:12px; }
+
   </style>
+  <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
 <nav>
@@ -28,79 +44,115 @@
   <a href="/paramset">Parameta Set Regist</a>
 </nav>
 
+
 <div class="container">
-  <h3>Simulation Regist</h3>
 
-  <div class="form-row">
-    <label>simul_id</label>
-    <input id="f_id" type="number" placeholder="(PK, required)">
+    <div class="card">
+      <h3>Simulation Regist</h3>
 
-    <label>simul_name</label>
-    <input id="f_name" type="text" maxlength="64">
+      <div class="form-grid">
+        <div class="field">
+          <label for="f_id">simul_id</label>
+          <input id="f_id" class="input" type="number">
+        </div>
 
-    <label>simul_desc</label>
-    <textarea id="f_desc" maxlength="256" placeholder="optional"></textarea>
+        <div class="field">
+          <label for="f_name">simul_name</label>
+          <input id="f_name" class="input" type="text">
+        </div>
 
-    <label>param_set_id</label>
-    <input id="f_param" type="number" placeholder="">
+        <div class="field">
+          <label for="f_type">simul_type</label>
+          <select id="f_type" class="input">
+            <option value="0">0 (주전략)</option>
+            <option value="1">1 (혼잡도 조합)</option>
+          </select>
+        </div>
 
-    <label>simul_from_date</label>
-    <input id="f_from" type="text" placeholder="yyyyMMddHHmmss or ISO">
+        <div class="field">
+          <label for="f_param">param_set_id</label>
+          <input id="f_param" class="input" type="number">
+        </div>
 
-    <label>simul_to_date</label>
-    <input id="f_to" type="text" placeholder="yyyyMMddHHmmss or ISO">
+        <div class="field w2">
+          <label for="f_desc">simul_desc</label>
+          <input id="f_desc" class="input" type="text">
+        </div>
 
-    <label>simul_candle</label>
-    <input id="f_candle" type="number" placeholder="ex) 20">
+        <div class="field">
+          <label for="f_from">from</label>
+          <input id="f_from" class="input" type="text" placeholder="yyyyMMddHHmmss">
+        </div>
 
-    <label>simul_type</label>
-    <select id="f_type">
-      <option value="0">0 (주전략)</option>
-      <option value="1">1 (혼잡도 조합)</option>
-    </select>
+        <div class="field">
+          <label for="f_to">to</label>
+          <input id="f_to" class="input" type="text" placeholder="yyyyMMddHHmmss">
+        </div>
 
-    <label>main_simul_id</label>
-    <input id="f_main" type="number" placeholder="(optional)">
 
-    <label>main_top_rank</label>
-    <input id="f_top" type="number" placeholder="(optional)">
+        <div>
+          <label for="f_candle">simul_candle</label>
+          <input id="f_candle" type="number" placeholder="ex) 1" />
+        </div>
 
-    <label>param_set_id</label>
-    <input id="f_param" type="number" placeholder="(optional)">
+        <div>
+          <label for="f_main">main_simul_id</label>
+          <input id="f_main" type="number" />
+        </div>
 
-    <label>reason</label>
-    <input id="f_reason" type="text" maxlength="256" placeholder="(optional)">
+        <div>
+          <label for="f_top">main_top_rank</label>
+          <input id="f_top" type="number" />
+        </div>
 
-    <label>is_active</label> <!-- NEW -->
-    <select id="f_active">
-        <option value="1">1 (활성)</option>
-        <option value="0">0 (비활성)</option>
-    </select>
-  </div>
 
-  <div class="btns">
-    <button id="btnAdd" type="button">Add</button>
-    <button id="btnSave" type="button">Save</button>
-    <button id="btnClear" type="button">Clear</button>
-    <button id="btnReload" type="button">Reload</button>
 
-  </div>
 
-  <table id="tbl">
-    <thead>
-      <tr>
-        <th>simul_id</th>
-        <th>simul_name</th>
-        <th>simul_type</th>
-        <th>reg_time</th>
-        <th>simul_from_date ~ simul_to_date</th>
-        <th>param_set_id</th>  <!-- NEW -->
-        <th>is_active</th>     <!-- NEW -->
-        <th>status</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+        <div class="col-2">
+          <label for="f_reason">reason</label>
+          <input id="f_reason" type="text" placeholder="변경 사유 / 메모" />
+        </div>
+
+
+        <div class="field">
+          <label for="f_active">is_active</label>
+          <select id="f_active" class="input">
+            <option value="1">1 (활성)</option>
+            <option value="0">0 (비활성)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="btnbar">
+        <button id="btnAdd"    class="btn" type="button">Add</button>
+        <button id="btnSave"   class="btn primary" type="button">Save</button>
+        <button id="btnClear"  class="btn" type="button">Clear</button>
+        <button id="btnReload" class="btn" type="button">Reload</button>
+      </div>
+
+
+
+    </div>
+
+    <!-- 리스트 -->
+    <div class="card" >
+      <h3>시뮬레이션 리스트</h3>
+      <table id="tbl">
+        <thead>
+          <tr>
+            <th>simul_id</th>
+            <th>simul_name</th>
+            <th>simul_type</th>
+            <th>reg_time</th>
+            <th>simul_from_date ~ simul_to_date</th>
+            <th>param_set_id</th>  <!-- NEW -->
+            <th>is_active</th>     <!-- NEW -->
+            <th>status</th>
+          </tr>
+        </thead>
+        <tbody id="listBody"></tbody>
+      </table>
+    </div>
 </div>
 
 <script>
@@ -126,6 +178,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const tbody = document.querySelector('#tbl tbody');
 
+
   // ===== 공용 헬퍼 =====
   async function api(url, init = {}) {
     const res = await fetch(url, {
@@ -139,31 +192,57 @@ document.addEventListener('DOMContentLoaded', () => {
     return js;
   }
   const typeName   = (t) => Number(t) === 1 ? '혼잡도 조합(1)' : '주전략(0)';
-  const activeName = (a) => Number(a) === 1 ? '활성(1)' : '비활성(0)';
 
-  function rowHtml(r){
-    const sid   = (r.simul_id ?? '') + '';
-    const name  = r.simul_name || '';
-    const typeS = typeName(r.simul_type);
-    const regS  = r.reg_time || '';
-    const fromS = r.simul_from_date || '';
-    const toS   = r.simul_to_date || '';
-    const span  = (fromS && toS) ? `${fromS} ~ ${toS}` : (fromS || toS);
-    const pid   = (r.param_set_id ?? '-') + '';
-    const actS  = activeName(r.is_active);
-    const status= (r.status ?? '') + '';
 
-    return `<tr data-id="${sid}">
-      <td>${sid}</td>
-      <td>${name}</td>
-      <td>${typeS}</td>
-      <td class="small">${regS}</td>
-      <td class="small">${span}</td>
-      <td>${pid}</td>
-      <td>${actS}</td>
-      <td>${status}</td>
-    </tr>`;
-  }
+  const activeBadge = (a) => {
+  const on = Number(a) === 1;
+  return `<span class="badge ${on ? 'on' : 'off'}" title="${on ? '활성(1)' : '비활성(0)'}">${on ? 'ON' : 'OFF'}</span>`;
+};
+
+function rowHtml(r){
+  const sid   = (r.simul_id ?? '') + '';
+  const name  = r.simul_name || '';
+  const typeV = Number(r.simul_type ?? 0);
+  const typeS = typeName(typeV);
+  const regS  = r.reg_time || '';
+  const fromS = r.simul_from_date || '';
+  const toS   = r.simul_to_date || '';
+  const span  = (fromS && toS) ? `${fromS} ~ ${toS}` : (fromS || toS);
+  const pid   = (r.param_set_id ?? '-') + '';
+  const actV  = Number(r.is_active) === 1 ? 1 : 0;
+  const actHtml = activeBadge(actV);
+  const status= (r.status ?? '') + '';
+
+  // 히든 항목들
+  const candle = r.simul_candle ?? '';
+  const desc   = (r.simul_desc || '').replace(/"/g, '&quot;');
+  const main   = r.main_simul_id ?? '';
+  const top    = r.main_top_rank ?? '';
+
+  return `<tr
+    data-id="${sid}"
+    data-name="${name.replace(/"/g, '&quot;')}"
+    data-type="${typeV}"
+    data-from="${fromS}"
+    data-to="${toS}"
+    data-param="${pid === '-' ? '' : pid}"
+    data-active="${actV}"
+    data-candle="${candle}"
+    data-desc="${desc}"
+    data-main="${main}"
+    data-top="${top}"
+  >
+    <td>${sid}</td>
+    <td>${name}</td>
+    <td>${typeS}</td>
+    <td class="small">${regS}</td>
+    <td class="small">${span}</td>
+    <td>${pid}</td>
+    <td>${actHtml}</td>     <!-- ← 뱃지 표시 -->
+    <td>${status}</td>
+  </tr>`;
+}
+
 
   function fillFormFromRow(tr){
     const tds = tr.children;
@@ -173,6 +252,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const period   = (tds[4]?.innerText || '').trim();
     const pidText  = (tds[5]?.innerText || '').trim();
     const actText  = (tds[6]?.innerText || '').trim();
+    const d = tr.dataset;
 
     f_id.value   = idText ? Number(idText) : '';
     f_name.value = nameText;
@@ -183,7 +263,18 @@ document.addEventListener('DOMContentLoaded', () => {
     f_to.value   = (parts[1]||'').trim();
 
     f_param.value  = (pidText === '-' ? '' : pidText);
-    f_active.value = (actText.includes('(1)')) ? '1' : '0';
+    //f_active.value = (actText.includes('(1)')) ? '1' : '0';
+
+    f_active.value = d.active || '1';
+    // is_active (dataset 우선, 없으면 뱃지 클래스 판독)
+    //const badge   = tds[6]?.querySelector('.badge');
+    //const actViaBadge = badge ? (badge.classList.contains('on') ? '1' : '0') : undefined;
+    //f_active.value = d.active ?? actViaBadge ?? '1';
+
+    f_candle.value = d.candle ?? '';
+    f_desc.value   = d.desc   ?? '';
+    f_main.value   = d.main   ?? '';
+    f_top.value    = d.top    ?? '';
   }
 
   async function fetchSimulList(){
