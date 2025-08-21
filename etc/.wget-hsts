@@ -1,6 +1,0 @@
-# HSTS 1.0 Known Hosts database for GNU Wget.
-# Edit at your own risk.
-# <hostname>	<port>	<incl. subdomains>	<created>	<max-age>
-www.postgresql.org	0	0	1754429763	31536000
-github.com	0	1	1754833921	31536000
-cdn.jsdelivr.net	0	1	1754605697	31536000
