@@ -40,7 +40,7 @@
 
 <nav class="nav-center">
     <a href="/">Monitoring</a>
-    <a href="/cuda">Cuda Simul</a>
+    <a href="/cuda">Simul List</a>
     <a href="/simul">Simul Reg</a>
     <a href="/paramset">Param Reg</a>
 </nav>
@@ -87,14 +87,18 @@
     <table id="simulTable">
       <thead>
         <tr>
-          <th>simul_id</th>
+          <th>id</th>
           <th>simul_type</th>
-          <th>main_simul_id</th>
+          <th class="right">m.id</th>
+          <th class="right">m.gid</th>
           <th>simul_name</th>
-          <th>from_date</th>
-          <th>to_date</th>
-          <th class="right">case_cnt</th>
-          <th>end_time</th>
+          <th class="right">from_date</th>
+          <th class="right">to_date</th>
+          <th class="right">case</th>
+          <th class="right">start_time</th>
+          <th class="right">end_time</th>
+          <th class="right">progress</th>
+          <th class="right">status</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -144,22 +148,50 @@ function renderTable(items, token){
     a.textContent = r.simul_id ?? '';
     td_id.appendChild(a);
 
-    const td_type = document.createElement('td'); td_type.textContent = r.simul_type ?? '';
-    const td_main = document.createElement('td'); td_main.textContent = r.main_simul_id ?? '';
+    const td_type = document.createElement('td'); td_type.textContent = r.simul_type === 0 ? "주전략" : (r.simul_type === 1 ? "혼잡도조합" : "");
+    const td_pid  = document.createElement('td'); td_pid.textContent  = r.main_simul_id ?? '';
+    td_pid.classList.add("right");
+    const td_gid  = document.createElement('td'); td_gid.textContent  = r.main_top_rank ?? '';
+    td_gid.classList.add("right");
     const td_name = document.createElement('td'); td_name.textContent = r.simul_name ?? '';
     const td_fd   = document.createElement('td'); td_fd.textContent   = r.simul_from_date ?? '';
+    td_fd.classList.add("right");
     const td_td   = document.createElement('td'); td_td.textContent   = r.simul_to_date ?? '';
+    td_td.classList.add("right");
     const td_case = document.createElement('td'); td_case.textContent = r.case_cnt ?? ''; td_case.className = 'right';
+    td_case.classList.add("right");
+    const td_start= document.createElement('td'); td_start.textContent= r.start_time ?? '';
+    td_start.classList.add("right");
     const td_end  = document.createElement('td'); td_end.textContent  = r.end_time ?? '';
+    td_end.classList.add("right");
+    const td_prs  = document.createElement('td');
+    td_prs.classList.add("right");
+    if (r.progress != null) {
+        // 정수 변환 후 % 붙이기
+        td_prs.textContent = `${Math.floor(r.progress)} %`;
+    } else {
+        td_prs.textContent = '';
+    }
+    //td_prs.textContent  = r.progress ?? '';
+    const td_st   = document.createElement('td');
+    td_st.classList.add("right");
+    if (r.status == 0) td_st.textContent  = 'Ready';
+    if (r.status == 1) td_st.textContent  = 'Running';
+    if (r.status == 2) td_st.textContent  = 'Done';
+    if (r.status == 3) td_st.textContent  = 'Error';
 
     tr.appendChild(td_id);
     tr.appendChild(td_type);
-    tr.appendChild(td_main);
+    tr.appendChild(td_pid);
+    tr.appendChild(td_gid);
     tr.appendChild(td_name);
     tr.appendChild(td_fd);
     tr.appendChild(td_td);
     tr.appendChild(td_case);
+    tr.appendChild(td_start);
     tr.appendChild(td_end);
+    tr.appendChild(td_prs);
+    tr.appendChild(td_st);
 
     tbody.appendChild(tr);
   }

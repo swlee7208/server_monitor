@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html>
 <head>
@@ -33,6 +34,8 @@
     .total { font-weight:bold; color:#222; }
     .muted { color:#666; font-size:12px; }
     .nav-center { display: flex; justify-content: center; }
+    .right { text-align:right; }
+    .left { text-align:left; }
   </style>
   <link rel="stylesheet" href="/static/app.css">
 </head>
@@ -92,7 +95,7 @@
 
         <div>
           <label for="f_candle">simul_candle</label>
-          <input id="f_candle" type="number" placeholder="ex) 1" />
+          <input id="f_candle" type="number" />
         </div>
 
         <div>
@@ -140,14 +143,16 @@
       <table id="tbl">
         <thead>
           <tr>
-            <th>simul_id</th>
-            <th>simul_name</th>
-            <th>simul_type</th>
-            <th>reg_time</th>
-            <th>simul_from_date ~ simul_to_date</th>
-            <th>param_set_id</th>  <!-- NEW -->
-            <th>is_active</th>     <!-- NEW -->
-            <th>status</th>
+            <th class="right">id</th>
+            <th class="right">simul_type</th>
+            <th class="right">m.id</th>
+            <th class="right">m.gid</th>
+            <th class="left">simul name</th>
+            <th class="right">reg time</th>
+            <th class="right">simul period</th>
+            <th class="right">psid</th>  <!-- param_set_id -->
+            <th class="right">active</th>
+            <th class="right">status</th>
           </tr>
         </thead>
         <tbody id="listBody"></tbody>
@@ -199,11 +204,13 @@ document.addEventListener('DOMContentLoaded', () => {
   return `<span class="badge ${on ? 'on' : 'off'}" title="${on ? '활성' : '비활성'}">${on ? 'ON' : 'OFF'}</span>`;
 };
 
+
 function rowHtml(r){
   const sid   = (r.simul_id ?? '') + '';
+  const typeV = Number(r.simul_type ?? 0); const typeS = typeName(typeV);
+  const mid   = (r.main_simul_id ?? '') + '';
+  const mgid  = (r.main_top_rank ?? '') + '';
   const name  = r.simul_name || '';
-  const typeV = Number(r.simul_type ?? 0);
-  const typeS = typeName(typeV);
   const regS  = r.reg_time || '';
   const fromS = r.simul_from_date || '';
   const toS   = r.simul_to_date || '';
@@ -211,7 +218,12 @@ function rowHtml(r){
   const pid   = (r.param_set_id ?? '-') + '';
   const actV  = Number(r.is_active) === 1 ? 1 : 0;
   const actHtml = activeBadge(actV);
-  const status= (r.status ?? '') + '';
+  const status =
+      r.status === 0 ? "Ready" :
+      r.status === 1 ? "Running" :
+      r.status === 2 ? "Done" :
+      r.status === 3 ? "Error" : "";
+
 
   // 히든 항목들
   const candle = r.simul_candle ?? '';
@@ -232,14 +244,16 @@ function rowHtml(r){
     data-main="${main}"
     data-top="${top}"
   >
-    <td>${sid}</td>
+    <td class="right">${sid}</td>
+    <td class="right">${typeS}</td>
+    <td class="right">${mid}</td>
+    <td class="right">${mgid}</td>
     <td>${name}</td>
-    <td>${typeS}</td>
-    <td class="small">${regS}</td>
-    <td class="small">${span}</td>
-    <td>${pid}</td>
-    <td>${actHtml}</td>     <!-- ← 뱃지 표시 -->
-    <td>${status}</td>
+    <td class="right">${regS}</td>
+    <td class="right">${span}</td>
+    <td class="right">${pid}</td>
+    <td class="right">${actHtml}</td>     <!-- ← 뱃지 표시 -->
+    <td class="right">${status}</td>
   </tr>`;
 }
 
@@ -247,16 +261,16 @@ function rowHtml(r){
   function fillFormFromRow(tr){
     const tds = tr.children;
     const idText   = (tds[0]?.innerText || '').trim();
-    const nameText = (tds[1]?.innerText || '').trim();
-    const typeText = (tds[2]?.innerText || '').trim();
-    const period   = (tds[4]?.innerText || '').trim();
-    const pidText  = (tds[5]?.innerText || '').trim();
-    const actText  = (tds[6]?.innerText || '').trim();
+    const nameText = (tds[4]?.innerText || '').trim();
+    const typeText = (tds[1]?.innerText || '').trim();
+    const period   = (tds[6]?.innerText || '').trim();
+    const pidText  = (tds[7]?.innerText || '').trim();
+    const actText  = (tds[9]?.innerText || '').trim();
     const d = tr.dataset;
 
     f_id.value   = idText ? Number(idText) : '';
     f_name.value = nameText;
-    f_type.value = (typeText.includes('(1)')) ? '1' : '0';
+    f_type.value = (typeText.includes('기본전략')) ? '0' : '1';
 
     const parts = period.split('~');
     f_from.value = (parts[0]||'').trim();
@@ -283,9 +297,14 @@ function rowHtml(r){
     return js.items || [];
   }
 
-  async function reloadList(){
+  //
+  // Reload List
+  //
+  async function reloadList()
+  {
     const items = await fetchSimulList();
     tbody.innerHTML = items.map(rowHtml).join('');
+
     const first = tbody.querySelector('tr');
     if (first) fillFormFromRow(first);
   }

@@ -1,3 +1,4 @@
+
 from flask import Flask, render_template, jsonify, request, redirect, url_for
 import psutil
 import subprocess
@@ -50,18 +51,40 @@ CANONICAL_MIN = {
 # ====== Simulation 컬럼 사양 ======
 # 리스트(하단 테이블)에 보여줄 컬럼
 SIMUL_LIST_EXPECTED = [
-    'simul_id', 'simul_name', 'simul_type',
-    'reg_time', 'simul_from_date', 'simul_to_date',
-    'param_set_id',              # NEW
-    'is_active',                 # NEW
-    'status', 'simul_candle', 'simul_desc', 'main_simul_id', 'main_top_rank'
+    'simul_id',
+    'simul_type',
+    'simul_desc',
+    'main_simul_id',
+    'param_set_id',
+    'main_top_rank',
+    'simul_name',
+    'simul_from_date',
+    'simul_to_date',
+    'case_cnt',
+    'start_time',
+    'end_time',
+    'progress',
+    'simul_candle',
+    'reg_time',
+    'is_active',
+    'status'
 ]
 
 # 쓰기(등록/수정) 허용 컬럼 (요청한 입력 항목)
 SIMUL_WRITE_FIELDS = [
-    'simul_id', 'simul_name', 'simul_desc', 'is_active',
-    'simul_from_date', 'simul_to_date', 'simul_candle',
-    'simul_type', 'main_simul_id', 'main_top_rank', 'param_set_id',
+    'simul_id',
+    'simul_name',
+    'simul_type',
+    'reg_time',
+    'simul_from_date',
+    'simul_to_date',
+    'param_set_id',
+    'is_active',
+    'status',
+    'main_simul_id',
+    'main_top_rank',
+    'simul_candle',
+    'simul_desc',
     'reason'
 ]
 
@@ -147,12 +170,12 @@ def _clean_simul_payload(raw: dict) -> dict:
         if k not in raw:
             continue
         v = raw[k]
-        if k in ('simul_id', 'simul_candle', 'simul_type',
+        if k in ('simul_id', 'simul_candle', 'simul_type','simul_candle',
                  'main_simul_id', 'main_top_rank', 'param_set_id', 'is_active'):
             data[k] = None if v is None or str(v).strip() == '' else int(v)
-        elif k in ('simul_from_date', 'simul_to_date'):
+        elif k in ('simul_from_date', 'simul_to_date', 'reg_time'):
             data[k] = _parse_ts(v)
-        elif k in ('simul_name', 'simul_desc', 'reason'):
+        elif k in ('simul_name', 'simul_desc', 'reason' ):
             data[k] = None if v is None else str(v).strip()
         else:
             data[k] = v
@@ -276,10 +299,11 @@ def fetch_simul_list(limit=200):
 
     # 날짜/시간 문자열화
     for r in rows:
-        for k in ('simul_from_date', 'simul_to_date', 'end_time', 'reg_time'):
+        for k in ('simul_from_date', 'simul_to_date', 'end_time', 'reg_time','start_time', 'end_time'):
             if k in r and r[k] is not None:
                 if isinstance(r[k], datetime):
-                    r[k] = r[k].strftime('%Y-%m-%d %H:%M:%S')
+                    r[k] = r[k].strftime('%Y-%m-%d %H:%M') if k in ('start_time', 'end_time') else r[k].strftime('%Y-%m-%d')
+                    #r[k] = r[k].strftime('%Y-%m-%d %H:%M:%S')
                 else:
                     r[k] = str(r[k])
     return rows
@@ -746,7 +770,7 @@ def api_simulation():
 @app.route('/paramset')
 def paramset_page():
     # 템플릿 추가
-    return render_template('paramset.html')
+    return render_template('param_regist.html')
 
 # =========[ APIs ]=========
 @app.route('/api/paramset/ids')
@@ -1118,5 +1142,4 @@ def api_combined_env_update():
 # =============================
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
-
 
