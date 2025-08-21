@@ -1,0 +1,6 @@
+let g:netrw_dirhistmax  =10
+let g:netrw_dirhistcnt =4
+let g:netrw_dirhist_4='/home/alpha/projects/alpha_cuda/src/cuda'
+let g:netrw_dirhist_3='/home/alpha/projects/alpha_cuda/include/alpha/cuda'
+let g:netrw_dirhist_2='/home/alpha/projects/alpha_cuda/include/alpha'
+let g:netrw_dirhist_1='/home/alpha/projects/alpha_cuda/CMakeFiles'

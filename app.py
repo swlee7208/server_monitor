@@ -334,7 +334,6 @@ def fetch_simul_detail(simul_id: int, limit=500):
             WHERE simul_id = %s
             ORDER BY
                 (total_profit)::double precision DESC NULLS LAST,
-                CASE WHEN trades IS NOT NULL AND trades > 0 THEN wins::float / trades ELSE -1 END DESC,
                 gid ASC
             LIMIT %s
         """
@@ -522,11 +521,11 @@ def cuda_entry():
     sid = request.args.get('simul_id', type=int)
     if sid and sid > 0:
         return redirect(url_for('cuda_detail_page', simul_id=sid))
-    return render_template('cuda.html')
+    return render_template('simul_list.html')
 
 @app.route('/cuda/<int:simul_id>')
 def cuda_detail_page(simul_id: int):
-    return render_template('simul_detail.html', simul_id=simul_id)
+    return render_template('simul_result.html', simul_id=simul_id)
 
 @app.route('/simul')
 def simul_regist_page():
@@ -865,6 +864,253 @@ def api_paramset_delete():
 
 
 
+
+# =============================
+# Combined env update (main + sub-strategy) + simul ids tagging
+# =============================
+
+PERIODS = [3,5,7,10,15,20,25,30,35,40,45,50,55,60,70,80,120]
+AVG_TARGETS = {
+    "s1m1_entry_avg1","s1m1_entry_avg2",
+    "s1m1_congest_avg1","s1m1_congest_avg2",
+    "s1m1_congest2_avg1","s1m1_congest2_avg2",
+    "s1m1_congest3_avg1","s1m1_congest3_avg2",
+}
+
+CONGEST_PREFIXES = ("s1m1_congest",)  # only sub-strategy congest* params overlay
+
+def _fmt_num_py(v):
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return '1' if v else '0'
+    try:
+        fv = float(v)
+        if abs(fv - int(fv)) < 1e-12:
+            return str(int(fv))
+        s = f"{fv:.6f}"
+        s = re.sub(r"\.0+$", "", s)
+        s = re.sub(r"(\.\d*[1-9])0+$", r"\1", s)
+        return s
+    except Exception:
+        return str(v)
+
+def _apply_avg_slot_conversion_py(param_map: dict) -> dict:
+    """
+    Convert *_avg1 (slot index) and *_avg2 (distance) into real periods from PERIODS[],
+    for keys listed in AVG_TARGETS. For entry_avg1/2 we only use them later to build flags.
+    """
+    out = dict(param_map)
+    for key in list(out.keys()):
+        if key in AVG_TARGETS and key.endswith('_avg1'):
+            v1 = out.get(key, None)
+            if v1 is None:
+                continue
+            try:
+                idx1 = max(0, min(len(PERIODS)-1, int(float(v1))))
+            except Exception:
+                continue
+            # Replace avg1 with actual period
+            out[key] = PERIODS[idx1]
+            # Handle paired avg2 for non-entry targets (congest etc.)
+            key2 = key.replace('_avg1', '_avg2')
+            if key.startswith('s1m1_entry_'):
+                # do not overwrite _avg2 here; entry avg2 is the distance for flags later
+                continue
+            if key2 in out and out[key2] is not None:
+                try:
+                    dist = int(float(out[key2]))
+                except Exception:
+                    continue
+                idx2 = max(0, min(len(PERIODS)-1, idx1 + dist))
+                out[key2] = PERIODS[idx2]
+    return out
+
+def _row_to_param_map_py(row: dict) -> dict:
+    m = {}
+    # Collect p1_name/val .. p20_name/val
+    for i in range(1, 21):
+        nk = f'p{i}_name'
+        vk = f'p{i}_val'
+        name = row.get(nk, None)
+        val  = row.get(vk, None)
+        if name is not None and str(name).strip() != '' and val is not None:
+            try:
+                m[str(name).strip()] = float(val)
+            except Exception:
+                continue
+    # fallback: if param_summary exists
+    ps = row.get('param_summary')
+    if ps and not m:
+        try:
+            for part in str(ps).split(';'):
+                s = part.strip()
+                if not s:
+                    continue
+                if '=' not in s:
+                    continue
+                k, v = s.split('=', 1)
+                try:
+                    m[k.strip()] = float(v.strip())
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    return m
+
+def _fetch_simul_meta(simul_id: int):
+    with get_pg_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+        sql = f'''
+            SELECT simul_id, simul_type, main_simul_id, main_top_rank
+            FROM {qualify(SIMUL_TABLE)}
+            WHERE simul_id = %s
+        '''
+        cur.execute(sql, (simul_id,))
+        row = cur.fetchone()
+        if not row:
+            raise RuntimeError(f'simul_id {simul_id} not found in {DB_SCHEMA}.{SIMUL_TABLE}')
+        return row
+
+def _resolve_gid_col(conn):
+    cols = get_table_columns(conn, RESULT_TABLE)
+    gid_col, _wins, _trades, _profit_expr = _resolve_result_columns(cols)
+    return gid_col, cols
+
+def _fetch_result_row(simul_id: int, gid: int):
+    with get_pg_conn() as conn:
+        gid_col, cols = _resolve_gid_col(conn)
+        sel = [f'{gid_col} AS gid']
+        for i in range(1, 21):
+            nk, vk = f'p{i}_name', f'p{i}_val'
+            if nk in cols: sel.append(nk)
+            if vk in cols: sel.append(vk)
+        # optional param_summary
+        if 'param_summary' in cols:
+            sel.append('param_summary')
+        sql = f'''
+            SELECT {', '.join(sel)}
+            FROM {qualify(RESULT_TABLE)}
+            WHERE simul_id = %s AND {gid_col} = %s
+            LIMIT 1
+        '''
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(sql, (simul_id, gid))
+            row = cur.fetchone()
+            if not row:
+                raise RuntimeError(f'Result row not found for simul_id={simul_id}, gid={gid}')
+            return row
+
+def _build_updates_from_maps(env_no: int, main_map: dict, sub_map: dict):
+    """
+    Merge main and sub parameter maps; see rules in code.
+    """
+    main_conv = _apply_avg_slot_conversion_py(main_map or {})
+    sub_conv  = _apply_avg_slot_conversion_py(sub_map or {})
+
+    updates = {}
+    for k, v in main_conv.items():
+        if k in ('s1m1_entry_avg1', 's1m1_entry_avg2'):
+            continue
+        if v is None:
+            continue
+        try:
+            fv = float(v)
+        except Exception:
+            continue
+        updates[k] = fv
+
+    for k, v in sub_conv.items():
+        if not any(k.startswith(pref) for pref in CONGEST_PREFIXES):
+            continue
+        if v is None:
+            continue
+        try:
+            fv = float(v)
+        except Exception:
+            continue
+        updates[k] = fv
+
+    slot1_raw = main_map.get('s1m1_entry_avg1', None)
+    dist_raw  = main_map.get('s1m1_entry_avg2', None)
+    picked = set()
+    if slot1_raw is not None:
+        try:
+            idx1 = max(0, min(len(PERIODS)-1, int(float(slot1_raw))))
+            picked.add(PERIODS[idx1])
+            if dist_raw is not None:
+                idx2 = max(0, min(len(PERIODS)-1, idx1 + int(float(dist_raw))))
+                picked.add(PERIODS[idx2])
+        except Exception:
+            pass
+    if picked:
+        for p in PERIODS:
+            updates[f'is_s1m1_avg{p}'] = 1 if p in picked else 0
+
+    set_parts = [f"{k}={_fmt_num_py(v)}" for k, v in updates.items()]
+    sql = f"UPDATE {qualify(ENV_TABLE)} SET " + ", ".join(set_parts) + f" WHERE env_no={int(env_no)};"
+    return sql, updates
+
+@app.route('/api/combined_env_update')
+def api_combined_env_update():
+    """Build combined UPDATE SQL (and updates JSON) for a clicked row."""
+    sub_simul_id = request.args.get('sub_simul_id', type=int)
+    gid          = request.args.get('gid', type=int)
+    env_no       = request.args.get('env_no', type=int)
+    if not sub_simul_id or not gid or not env_no:
+        return jsonify({'ok': False, 'error': 'sub_simul_id, gid, env_no are required'}), 400
+
+    try:
+        meta = _fetch_simul_meta(sub_simul_id)
+        simul_type   = int(meta.get('simul_type') or 0)
+        main_simul_id = meta.get('main_simul_id')
+        main_top_rank = meta.get('main_top_rank')
+
+        if simul_type == 0:
+            row = _fetch_result_row(sub_simul_id, gid)
+            main_map = _row_to_param_map_py(row)
+            sql, updates = _build_updates_from_maps(env_no, main_map, {})
+        else:
+            if not main_simul_id or not main_top_rank:
+                return jsonify({'ok': False, 'error': 'Missing main_simul_id/main_top_rank in simul table'}), 400
+            row_sub  = _fetch_result_row(sub_simul_id, gid)
+            row_main = _fetch_result_row(int(main_simul_id), int(main_top_rank))
+            main_map = _row_to_param_map_py(row_main)
+            sub_map  = _row_to_param_map_py(row_sub)
+            sql, updates = _build_updates_from_maps(env_no, main_map, sub_map)
+
+        # Attach simul ids/gids into updates
+        if simul_type == 0:
+            main_id = int(sub_simul_id)
+            main_gid = int(gid)
+            sub_id = 0
+            sub_gid = 0
+        else:
+            main_id = int(main_simul_id)
+            main_gid = int(main_top_rank)
+            sub_id = int(sub_simul_id)
+            sub_gid = int(gid)
+        updates['simul_id'] = main_id
+        updates['simul_gid'] = main_gid
+        updates['sub_simul_id'] = sub_id
+        updates['sub_simul_gid'] = sub_gid
+        # Rebuild SQL to include the four new columns as well
+        set_parts = [f"{k}={_fmt_num_py(v)}" for k, v in updates.items()]
+        sql = f"UPDATE {qualify(ENV_TABLE)} SET " + ", ".join(set_parts) + f" WHERE env_no={int(env_no)};"
+
+
+        return jsonify({
+            'ok': True,
+            'sql': sql,
+            'updates': updates,
+            'simul_type': simul_type,
+            'main_simul_id': main_simul_id,
+            'main_top_rank': main_top_rank,
+            'main_gid': (int(main_top_rank) if main_top_rank else None),
+            'sub_simul_id': int(sub_simul_id),
+            'sub_gid': int(gid)
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
 # =============================
 # Main
 # =============================

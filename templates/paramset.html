@@ -33,15 +33,18 @@
     .off { background:#fee2e2; color:#7f1d1d; }
     .total { font-weight:bold; color:#222; }
     .muted { color:#666; font-size:12px; }
+    .nav-center { display: flex; justify-content: center; }
   </style>
 </head>
 <body>
-<nav>
-  <a href="/">Server Monitor</a>
-  <a href="/cuda">Alpha Cuda Simul</a>
-  <a href="/simul">Simulation Regist</a>
-  <a href="/paramset">Parameta Set Regist</a>
+
+<nav class="nav-center">
+    <a href="/">Monitoring</a>
+    <a href="/cuda">Cuda Simul</a>
+    <a href="/simul">Simul Reg</a>
+    <a href="/paramset">Param Reg</a>
 </nav>
+
 
 <div class="container">
 
@@ -156,8 +159,8 @@
 const $ = (id) => document.getElementById(id);
 
 // 상단 어딘가(전역) — 레퍼런스 러닝타임
-const BASE_CASES = 272_160;
-const BASE_SEC   = 27 + 0.060; // 27s 60ms = 27.06s
+const BASE_CASES = 6_912_000;
+const BASE_SEC   = 1357;
 
 function toInt(v, def=0){ const n = parseInt(v,10); return isNaN(n)?def:n; }
 function toNum(v){ const n = Number(v); return isNaN(n)?null:n; }

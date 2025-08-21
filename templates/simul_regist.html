@@ -32,16 +32,16 @@
     .off { background:#fee2e2; color:#7f1d1d; }
     .total { font-weight:bold; color:#222; }
     .muted { color:#666; font-size:12px; }
-
+    .nav-center { display: flex; justify-content: center; }
   </style>
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-<nav>
-  <a href="/">Server Monitor</a>
-  <a href="/cuda">Alpha Cuda Simul</a>
-  <a href="/simul">Simulation Regist</a>
-  <a href="/paramset">Parameta Set Regist</a>
+<nav class="nav-center">
+    <a href="/">Monitoring</a>
+    <a href="/cuda">Cuda Simul</a>
+    <a href="/simul">Simul Reg</a>
+    <a href="/paramset">Param Reg</a>
 </nav>
 
 
@@ -64,8 +64,8 @@
         <div class="field">
           <label for="f_type">simul_type</label>
           <select id="f_type" class="input">
-            <option value="0">0 (주전략)</option>
-            <option value="1">1 (혼잡도 조합)</option>
+            <option value="0">기본전략</option>
+            <option value="1">혼잡도 조합</option>
           </select>
         </div>
 
@@ -117,8 +117,8 @@
         <div class="field">
           <label for="f_active">is_active</label>
           <select id="f_active" class="input">
-            <option value="1">1 (활성)</option>
-            <option value="0">0 (비활성)</option>
+            <option value="1">활성</option>
+            <option value="0">비활성</option>
           </select>
         </div>
       </div>
@@ -191,12 +191,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     return js;
   }
-  const typeName   = (t) => Number(t) === 1 ? '혼잡도 조합(1)' : '주전략(0)';
+  const typeName   = (t) => Number(t) === 1 ? '혼잡도 조합' : '기본전략';
 
 
   const activeBadge = (a) => {
   const on = Number(a) === 1;
-  return `<span class="badge ${on ? 'on' : 'off'}" title="${on ? '활성(1)' : '비활성(0)'}">${on ? 'ON' : 'OFF'}</span>`;
+  return `<span class="badge ${on ? 'on' : 'off'}" title="${on ? '활성' : '비활성'}">${on ? 'ON' : 'OFF'}</span>`;
 };
 
 function rowHtml(r){

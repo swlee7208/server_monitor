@@ -5,105 +5,158 @@
   <meta charset="UTF-8">
   <title>Alpha Cuda Simul — Detail</title>
   <style>
+    /* === 통일된 스타일 (paramset/simul_list와 동일 톤) === */
     body { font-family: Arial, sans-serif; margin: 0; }
     nav { background:#343a40; padding:10px; display:flex; gap:20px; }
     nav a { color:#fff; text-decoration:none; font-weight:bold; }
     nav a:hover { text-decoration:underline; }
-    .container { padding:20px; }
-    .toolbar { display:flex; align-items:center; gap:12px; margin:6px 0 14px 0; flex-wrap:wrap; }
-    .toolbar label { font-size:12px; color:#333; }
-    .toolbar input, .toolbar select, .toolbar button { padding:4px 6px; }
-    .muted { color:#777; }
-    table { width:100%; border-collapse: collapse; margin-top:8px; }
-    th, td { border:1px solid #e1e1e1; padding:6px 8px; font-size:12px; }
-    th { background:#f5f6f7; text-align:left; }
-    tr:hover { background:#fafafa; }
-    .right { text-align:right; }
-    .nowrap { white-space: nowrap; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
-    .sortable { cursor:pointer; user-select:none; }
-    .sortable::after { content: ' ⬍'; opacity: .4; }
-    .sortable.sort-asc::after { content: ' ▲'; opacity: .8; }
-    .sortable.sort-desc::after { content: ' ▼'; opacity: .8; }
 
-    .disabled-btn { opacity: .5; pointer-events: none; }
+    .container { padding:16px; }
+    .row { display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; }
+    .card { background:#f8f9fa; border-radius:8px; padding:12px; margin-bottom:14px; }
+    .card h3 { margin:4px 0 10px 0; font-size:16px; }
+
+    label { font-size:12px; color:#333; display:block; margin-bottom:4px; }
+    input[type="text"], input[type="number"], select {
+      width:100%; padding:6px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px;
+    }
+
+    .btnbar { display:flex; gap:8px; margin-top:0; flex-wrap:wrap; }
+    button { padding:7px 12px; border-radius:6px; border:1px solid #888; background:#fff; cursor:pointer; }
+    button.primary { background:#2b7cff; color:#fff; border-color:#2b7cff; }
+    .disabled-btn { opacity:.5; pointer-events:none; }
+
+    table { width:100%; border-collapse:collapse; }
+    th, td { border-bottom:1px solid #e3e3e3; padding:6px 8px; font-size:13px; }
+    th { text-align:left; background:#f5f6f7; }
+    tr:hover { background:#f1f5ff; cursor:pointer; }
+
+    .right { text-align:right; }
+    .nowrap { white-space:nowrap; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+    .muted { color:#666; font-size:12px; }
+
+    .sortable { cursor:pointer; user-select:none; }
+    .sortable::after { content:' ⬍'; opacity:.4; }
+    .sortable.sort-asc::after { content:' ▲'; opacity:.8; }
+    .sortable.sort-desc::after { content:' ▼'; opacity:.8; }
+    .nav-center { display: flex; justify-content: center; }
   </style>
 </head>
 <body>
-
-<nav>
-  <a href="/">Server Monitor</a>
-  <a href="/cuda">Alpha Cuda Simul</a>
-  <a href="/simul">Simulation Regist</a>
-  <a href="/paramset">Parameta Set Regist</a>
+<nav class="nav-center">
+    <a href="/">Monitoring</a>
+    <a href="/cuda">Cuda Simul</a>
+    <a href="/simul">Simul Reg</a>
+    <a href="/paramset">Param Reg</a>
 </nav>
 
 
 <div class="container">
-  <h4>Simulation Detail — simul_id: <span id="simulId">{{ simul_id }}</span></h4>
+  <h4 style="margin: 8px 0 10px 2px;">Simulation Detail — simul_id: <span id="simulId">{{ simul_id }}</span></h4>
 
-  <div class="toolbar">
-    <label>Max Rows:
-      <select id="limit">
-        <option value="100">100</option>
-        <option value="200" selected>200</option>
-        <option value="500">500</option>
-        <option value="1000">1000</option>
-      </select>
-    </label>
-    <label>Filter (case / params):
-      <input type="text" id="filter" placeholder="">
-    </label>
-    <label>env_no:
-      <input type="number" id="envNo" value="5" style="width:80px;">
-    </label>
-    <button id="reloadBtn">Reload</button>
-    <span id="status" class="muted"></span>
+  <!-- 상단 입력부: 카드 + 두 줄(row) 구성 -->
+  <div class="card">
+    <!-- 1행 -->
+    <div class="row">
+      <div style="min-width:140px;">
+        <label>Max Rows</label>
+        <select id="limit">
+          <option value="100">100</option>
+          <option value="200" selected>200</option>
+          <option value="500">500</option>
+          <option value="1000">1000</option>
+        </select>
+      </div>
 
-  <div class="toolbar" id="rangeBar">
-    <label>Win Rate(%)&nbsp;
-      <input type="number" id="winMin" style="width:80px;" placeholder="min"> ~
-      <input type="number" id="winMax" style="width:80px;" placeholder="max">
-    </label>
-    <label>Profit&nbsp;
-      <input type="number" id="profitMin" style="width:100px;" placeholder="min"> ~
-      <input type="number" id="profitMax" style="width:100px;" placeholder="max">
-    </label>
-    <label>Trade cnt&nbsp;
-      <input type="number" id="tradesMin" style="width:100px;" placeholder="min"> ~
-      <input type="number" id="tradesMax" style="width:100px;" placeholder="max">
-    </label>
+      <div style="min-width:300px; flex:1;">
+        <label>Filter (case / params)</label>
+        <input type="text" id="filter" placeholder="">
+      </div>
 
-    <div style="flex:1"></div>
+      <div style="min-width:120px;">
+        <label>env_no</label>
+        <input type="number" id="envNo" value="5">
+      </div>
 
-    <label>Page:
-      <input type="number" id="page" value="1" style="width:70px;">
-    </label>
-    <button id="prevPageBtn">Prev</button>
-    <button id="nextPageBtn">Next</button>
+      <div>
+        <label>&nbsp;</label>
+        <div class="btnbar">
+          <button id="reloadBtn" class="primary">Reload</button>
+        </div>
+      </div>
+
+      <div style="margin-left:auto">
+        <div class="muted" id="status">Rows: 0</div>
+      </div>
+    </div>
+
+    <!-- 2행: 범위/페이지 -->
+    <div class="row" id="rangeBar">
+      <div>
+        <label>Win Rate (%)</label>
+        <div style="display:flex; gap:6px;">
+          <input type="number" id="winMin" style="width:90px;" placeholder="min">
+          <span style="align-self:center;">~</span>
+          <input type="number" id="winMax" style="width:90px;" placeholder="max">
+        </div>
+      </div>
+
+      <div>
+        <label>Profit</label>
+        <div style="display:flex; gap:6px;">
+          <input type="number" id="profitMin" style="width:110px;" placeholder="min">
+          <span style="align-self:center;">~</span>
+          <input type="number" id="profitMax" style="width:110px;" placeholder="max">
+        </div>
+      </div>
+
+      <div>
+        <label>Trade cnt</label>
+        <div style="display:flex; gap:6px;">
+          <input type="number" id="tradesMin" style="width:110px;" placeholder="min">
+          <span style="align-self:center;">~</span>
+          <input type="number" id="tradesMax" style="width:110px;" placeholder="max">
+        </div>
+      </div>
+
+      <div style="flex:1"></div>
+
+      <div>
+        <label>Page</label>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <input type="number" id="page" value="1" style="width:80px;">
+          <button id="prevPageBtn">Prev</button>
+          <button id="nextPageBtn">Next</button>
+        </div>
+      </div>
+    </div>
   </div>
-</div>
 
-  <table id="detailTable">
-    <thead>
-      <tr>
-        <th>#</th>
-        <th class="nowrap">case_id</th>
-        <th class="right nowrap sortable" data-sortkey="win_rate">win_rate (%)</th>
-        <th class="right nowrap">wins</th>
-        <th class="right nowrap">trades</th>
-        <th class="right nowrap sortable" data-sortkey="profit">profit</th>
-        <th>params</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+  <!-- 리스트 카드 -->
+  <div class="card">
+    <h3>결과 리스트</h3>
+    <table id="detailTable">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th class="nowrap">case_id</th>
+          <th class="right nowrap sortable" data-sortkey="win_rate">win_rate (%)</th>
+          <th class="right nowrap">wins</th>
+          <th class="right nowrap">trades</th>
+          <th class="right nowrap sortable" data-sortkey="profit">profit</th>
+          <th>params</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
 </div>
 
 <!-- SQL 팝업 -->
 <dialog id="sqlDialog" style="max-width:900px; width:90%;">
   <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
-    <b>Generated SQL</b>
+    <div style="display:flex; flex-direction:column; gap:6px;"><b>Generated SQL</b><div id="sqlMeta" style="font-size:12px; display:flex; flex-wrap:wrap; gap:6px;"></div></div>
     <div style="display:flex; gap:8px;">
       <button id="copySqlBtn">Copy</button>
       <button id="applySqlBtn">Apply</button>
@@ -114,8 +167,9 @@
 </dialog>
 
 <script>
+/* ====== 기존 스크립트는 그대로 두되, ID/구조만 위와 동일 ====== */
 
-// 정렬 상태 (기본: profit desc)
+/* 정렬 상태 (기본: profit desc) */
 let sortKey = 'profit';
 let sortDir = 'desc';
 
@@ -124,35 +178,7 @@ function num(v, fallback = Number.NEGATIVE_INFINITY){
   return Number.isFinite(n) ? n : fallback;
 }
 
-// ---------- URL state helpers ----------
-function loadStateFromURL(){
-  const qp = new URLSearchParams(location.search);
-  const setNum = (id, key) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    const v = qp.get(key);
-    if (v !== null) el.value = v;
-  };
-  setNum('limit','page_size'); // reuse as page_size
-  setNum('page','page');
-  setNum('winMin','win_min');
-  setNum('winMax','win_max');
-  setNum('profitMin','profit_min');
-  setNum('profitMax','profit_max');
-  setNum('tradesMin','trades_min');
-  setNum('tradesMax','trades_max');
-  const filter = qp.get('filter');
-  if (filter !== null) document.getElementById('filter').value = filter;
-  const envNo = qp.get('env_no');
-  if (envNo !== null) document.getElementById('envNo').value = envNo;
-
-  // sort
-  const s = qp.get('sort'); const d = qp.get('dir');
-  if (s) sortKey = (s === 'win_rate' ? 'win_rate' : 'profit');
-  if (d) sortDir = (d === 'asc' ? 'asc' : 'desc');
-  updateHeaderSortUI();
-}
-
+/* URL state helpers (필요 시 사용) */
 function saveStateToURL(){
   const qp = new URLSearchParams();
   qp.set('simul_id', String(simulId));
@@ -180,9 +206,9 @@ function saveStateToURL(){
 }
 
 function getWinRate(r){
-  if (r.win_rate != null) return num(r.win_rate, -1);
-  const wins = num(r.wins ?? r.win_cnt, 0);
-  const trades = num(r.trades ?? r.trade_cnt, 0);
+  if (r.win_rate != null) return Number(r.win_rate);
+  const wins = Number(r.wins ?? r.win_cnt ?? 0);
+  const trades = Number(r.trades ?? r.trade_cnt ?? 0);
   return trades > 0 ? (wins / trades * 100) : -1;
 }
 function getProfit(r){
@@ -197,16 +223,7 @@ function updateHeaderSortUI(){
   });
 }
 
-function getWinRate(r){
-  if (r.win_rate != null) return Number(r.win_rate);
-  const wins = Number(r.wins ?? r.win_cnt ?? 0);
-  const trades = Number(r.trades ?? r.trade_cnt ?? 0);
-  return trades > 0 ? (wins / trades * 100) : -1;
-}
-
-
-
-// simul_id 확보 (템플릿/경로/쿼리)
+/* simul_id 확보 */
 let simulId = Number(document.getElementById('simulId').textContent);
 if (!Number.isFinite(simulId) || simulId < 0) {
   const path = window.location.pathname.split('/').filter(Boolean);
@@ -219,9 +236,8 @@ if (!Number.isFinite(simulId) || simulId < 0) {
   if (Number.isFinite(fromQ) && fromQ > 0) simulId = fromQ;
 }
 
-// 평균기간 슬롯 매핑 (0-based index)
+/* 평균기간 슬롯 매핑 */
 const PERIODS = [3,5,7,10,15,20,25,30,35,40,45,50,55,60,70,80,120];
-// avg 변환 대상
 const AVG_TARGETS = new Set([
   "s1m1_entry_avg1","s1m1_entry_avg2",
   "s1m1_congest_avg1","s1m1_congest_avg2",
@@ -236,19 +252,17 @@ function fmtNum(n){
   return s.replace(/\.0+$/,'').replace(/(\.\d*[1-9])0+$/,'$1');
 }
 
-// p{i}_name / p{i}_val 우선 사용, 없으면 param_summary 파싱
+/* param map */
 function buildParamMap(item){
   const map = {};
   let foundAny = false;
   for (let i=1;i<=20;i++){
-    const nk = 'p' + i + '_name', vk = 'p' + i + '_val';
+    const nk='p'+i+'_name', vk='p'+i+'_val';
     if (nk in item || vk in item){
-      const name = item[nk];
-      const val  = item[vk];
+      const name=item[nk], val=item[vk];
       if (name !== null && name !== undefined && String(name).trim() !== ''){
         const num = (val === null || val === undefined) ? null : Number(val);
-        map[String(name)] = isNaN(num) ? null : num;
-        foundAny = true;
+        map[String(name)] = isNaN(num) ? null : num; foundAny = true;
       }
     }
   }
@@ -266,11 +280,8 @@ function buildParamMap(item){
   return map;
 }
 
-// avg1/avg2 슬롯 → 실제 기간으로 변환
+/* avg1/avg2 슬롯 → 실제 기간으로 변환 */
 function applyAvgSlotConversion(map){
-  // 규칙:
-  // - *_avg1 = PERIODS[slot1]
-  // - *_avg2 = PERIODS[slot1 + distance] (경계 보정)
   for (const key of Object.keys(map)){
     if (!AVG_TARGETS.has(key)) continue;
     const val = map[key];
@@ -278,28 +289,23 @@ function applyAvgSlotConversion(map){
     if (key.endsWith('_avg1')){
       const slot1 = Math.max(0, Math.min(PERIODS.length-1, Math.floor(Number(val))));
       map[key] = PERIODS[slot1];
-
-      const key2 = key.replace('_avg1', '_avg2');
+      const key2 = key.replace('_avg1','_avg2');
       if (key2 in map && map[key2] !== null){
         const dist = Math.floor(Number(map[key2]));
         const idx2 = Math.max(0, Math.min(PERIODS.length-1, slot1 + dist));
-        map[key2]  = PERIODS[idx2];
+        map[key2] = PERIODS[idx2];
       }
     }
   }
   return map;
 }
 
-// UPDATE SQL 생성
-// ✅ UPDATE SQL 생성
-// - 일반 파라미터는 그대로 col=val
-// - s1m1_entry_avg1/avg2 는 env 플래그(is_s1m1_avg{period}) 0/1 로 변환
-// - 다른 이평 파라미터는 건드리지 않음
+/* UPDATE SQL 생성 */
 function buildUpdateSQL(item, envNo){
   const raw = buildParamMap(item);
   const sets = [];
+  applyAvgSlotConversion(raw);
 
-  // 1) 일반 파라미터(AVG1/AVG2 제외) → 그대로 SET
   for (const [k, v] of Object.entries(raw)){
     if (k === 's1m1_entry_avg1' || k === 's1m1_entry_avg2') continue; // 별도 처리
     if (v === null || v === undefined) continue;
@@ -307,12 +313,9 @@ function buildUpdateSQL(item, envNo){
     sets.push(`${k}=${f}`);
   }
 
-  // 2) s1m1_entry_avg1/avg2 → is_s1m1_avg{period} 플래그로 확장
-  //    slot1 = avg1 슬롯, slot2 = avg1+거리 의 슬롯
   const slot1_raw = raw['s1m1_entry_avg1'];
   const dist_raw  = raw['s1m1_entry_avg2'];
-
-  const picked = new Set();  // 선택된 period 집합(예: {10, 40})
+  const picked = new Set();
   if (slot1_raw !== null && slot1_raw !== undefined && !Number.isNaN(Number(slot1_raw))){
     const idx1 = Math.max(0, Math.min(PERIODS.length-1, Math.floor(Number(slot1_raw))));
     picked.add(PERIODS[idx1]);
@@ -321,9 +324,6 @@ function buildUpdateSQL(item, envNo){
       picked.add(PERIODS[idx2]);
     }
   }
-
-  // 모든 is_s1m1_avg{period} 를 0 또는 1로 SET
-  // (요구사항: 선택된 것만 1, 나머지는 모두 0)
   if (picked.size > 0){
     for (const p of PERIODS){
       const col = `is_s1m1_${'avg'}${p}`;
@@ -331,19 +331,19 @@ function buildUpdateSQL(item, envNo){
       sets.push(`${col}=${val}`);
     }
   }
-
   if (sets.length === 0){
     return `-- No updatable parameters for env_no=${envNo}`;
   }
   return `UPDATE alpha.alpha_env SET ${sets.join(', ')} WHERE env_no=${envNo};`;
 }
 
-
+/* 데이터 로드 */
 async function loadDetail(){
   const qp = new URLSearchParams();
   qp.set('simul_id', String(simulId));
   qp.set('page', document.getElementById('page').value || '1');
   qp.set('page_size', document.getElementById('limit').value || '200');
+
   const wmin = document.getElementById('winMin').value.trim();
   const wmax = document.getElementById('winMax').value.trim();
   const pmin = document.getElementById('profitMin').value.trim();
@@ -357,15 +357,15 @@ async function loadDetail(){
   if (tmin) qp.set('trades_min', tmin);
   if (tmax) qp.set('trades_max', tmax);
 
-  // sorting server-side
   qp.set('sort', sortKey === 'win_rate' ? 'win_rate' : 'profit');
   qp.set('dir', sortDir === 'asc' ? 'asc' : 'desc');
 
   const res = await fetch('/api/simul_detail?' + qp.toString());
-  if (!res.ok){ throw new Error(await res.text() || ('HTTP ' + res.status)); }
+  if (!res.ok) throw new Error(await res.text() || ('HTTP ' + res.status));
   return await res.json();
 }
 
+/* 필터 */
 function matchFilter(r, token){
   if (!token) return true;
   const t = token.toLowerCase();
@@ -375,58 +375,36 @@ function matchFilter(r, token){
   );
 }
 
-// 헤더 클릭으로 정렬 토글
+/* 정렬 헤더 셋업 */
 function setupSortHeaders(){
   document.querySelectorAll('#detailTable th.sortable').forEach(th => {
     th.addEventListener('click', () => {
       const key = th.dataset.sortkey;
       if (!key) return;
-
-      if (key === sortKey) {
-        sortDir = (sortDir === 'desc') ? 'asc' : 'desc'; // 토글
-      } else {
-        sortKey = key;
-        sortDir = 'desc'; // 새 키의 기본은 내림차순
-      }
-
+      if (key === sortKey) sortDir = (sortDir === 'desc') ? 'asc' : 'desc';
+      else { sortKey = key; sortDir = 'desc'; }
       updateHeaderSortUI();
-
       const items = window.__detailCache || [];
       const filterVal = document.getElementById('filter').value.trim();
       renderTable(items, filterVal);
-      // 디버그용:
-      // console.debug('sorted by', sortKey, sortDir);
     });
   });
 }
 
+/* 테이블 렌더 */
 function renderTable(items, token){
   const tbody = document.querySelector('#detailTable tbody');
   tbody.innerHTML = '';
 
   const filtered = items.filter(r => matchFilter(r, token));
-
-  //// (server-side sorting)
-    //if (wb !== wa) return wb - wa;
-    //const pa = (a.total_profit ?? a.total_profit_ptr ?? a.profit_ptr ?? -1);
-    //const pb = (b.total_profit ?? b.total_profit_ptr ?? b.profit_ptr ?? -1);
-    //return pb - pa;
-  //});
-
   filtered.sort((a, b) => {
-    // 1순위: 사용자가 고른 키
     const va = (sortKey === 'profit') ? getProfit(a) : getWinRate(a);
     const vb = (sortKey === 'profit') ? getProfit(b) : getWinRate(b);
     if (va !== vb) return (sortDir === 'desc') ? (vb - va) : (va - vb);
-    // 2순위: 다른 지표 (항상 desc)
     const pa = getProfit(a), pb = getProfit(b);
     const wa = getWinRate(a), wb = getWinRate(b);
-    if (sortKey === 'profit'){
-        if (wb !== wa) return wb - wa;
-    }else{
-        if (pb !== pa) return pb - pa;
-    }
-    // 3순위: gid asc
+    if (sortKey === 'profit'){ if (wb !== wa) return wb - wa; }
+    else { if (pb !== pa) return pb - pa; }
     return (a.gid ?? a.case_id ?? 0) - (b.gid ?? b.case_id ?? 0);
   });
 
@@ -435,15 +413,54 @@ function renderTable(items, token){
     rank += 1;
     const tr = document.createElement('tr');
     tr.title = '클릭하면 UPDATE SQL을 생성합니다';
-    tr.addEventListener('click', () => {
 
+    tr.addEventListener('click', async () => {
       __lastSelectedDetailRow = r;
+      __lastCombinedPayload = null; // reset
 
       const envNo = parseInt(document.getElementById('envNo').value, 10) || 0;
-      const sql = buildUpdateSQL(r, envNo);
+      const gid   = (r.gid ?? r.case_id ?? null);
       const dlg = document.getElementById('sqlDialog');
       const ta  = document.getElementById('sqlText');
-      ta.value = sql;
+
+      try {
+        if (!gid) throw new Error('gid not found in row');
+        // Ask server to build combined SQL (handles both main & sub cases)
+        const qp = new URLSearchParams();
+        qp.set('sub_simul_id', String(simulId));
+        qp.set('gid', String(gid));
+        qp.set('env_no', String(envNo));
+        const res = await fetch('/api/combined_env_update?' + qp.toString());
+        const js  = await res.json();
+        if (!res.ok || !js.ok) {
+          throw new Error(js && js.error ? js.error : ('HTTP ' + res.status));
+        }
+        ta.value = js.sql || '-- No SQL returned';
+        __lastCombinedPayload = { env_no: envNo, updates: js.updates || {} };
+
+        // Meta banner
+        const meta = document.getElementById('sqlMeta');
+        if (meta){
+          const mt = js.simul_type;
+          const msid = js.main_simul_id ?? null;
+          const mgid = js.main_gid ?? js.main_top_rank ?? null;
+          const ssid = js.sub_simul_id ?? simulId;
+          const sgid = js.sub_gid ?? gid;
+          const badge = (k,v)=>`<span style="padding:2px 6px;border:1px solid #999;border-radius:999px;">${k}: <b>${v}</b></span>`;
+          const parts = [];
+          parts.push(badge('simul_type', mt));
+          parts.push(badge('main_simul_id', msid ?? '-'));
+          parts.push(badge('main_gid', mgid ?? '-'));
+          parts.push(badge('sub_simul_id', ssid ?? '-'));
+          parts.push(badge('sub_gid', sgid ?? '-'));
+          meta.innerHTML = parts.join(' ');
+        }
+      } catch (e) {
+        // Fallback: local single-row build (main-only)
+        const sql = buildUpdateSQL(r, envNo);
+        ta.value = sql;
+        __lastCombinedPayload = null;
+      }
       if (typeof dlg.showModal === 'function') dlg.showModal();
       else dlg.setAttribute('open','');
     });
@@ -451,39 +468,18 @@ function renderTable(items, token){
     const td_rank = document.createElement('td'); td_rank.textContent = rank;
     const td_case = document.createElement('td'); td_case.textContent = r.case_id ?? r.gid ?? ''; td_case.className = 'mono';
 
-    //const td_wr   = document.createElement('td'); td_wr.textContent   = (r.win_rate != null) ? r.win_rate.toFixed(2) : ''; td_wr.className = 'right';
-    //const td_wc   = document.createElement('td'); td_wc.textContent   = r.wins ?? r.win_cnt ?? ''; td_wc.className = 'right';
-    //const td_tc   = document.createElement('td'); td_tc.textContent   = r.trades ?? r.trade_cnt ?? ''; td_tc.className = 'right';
-    //const profit  = (r.total_profit ?? r.total_profit_ptr ?? r.profit_ptr ?? '');
-    //const td_pf   = document.createElement('td'); td_pf.textContent   = profit; td_pf.className = 'right';
-
-    // win_rate 표시: 없으면 wins/trades로 계산해서 % 표시
     const td_wr = document.createElement('td');
-    td_wr.textContent = (r.win_rate != null)
-      ? Number(r.win_rate).toFixed(2)
-      : (getWinRate(r) >= 0 ? getWinRate(r).toFixed(2) : '');
+    td_wr.textContent = (r.win_rate != null) ? Number(r.win_rate).toFixed(2)
+                                             : (getWinRate(r) >= 0 ? getWinRate(r).toFixed(2) : '');
     td_wr.className = 'right';
 
-    // wins / trades 그대로
-    const td_wc = document.createElement('td');
-    td_wc.textContent = r.wins ?? r.win_cnt ?? '';
-    td_wc.className = 'right';
+    const td_wc = document.createElement('td'); td_wc.textContent = r.wins ?? r.win_cnt ?? ''; td_wc.className = 'right';
+    const td_tc = document.createElement('td'); td_tc.textContent = r.trades ?? r.trade_cnt ?? ''; td_tc.className = 'right';
 
-    const td_tc = document.createElement('td');
-    td_tc.textContent = r.trades ?? r.trade_cnt ?? '';
-    td_tc.className = 'right';
-
-    // profit 표시
     const profit = (r.total_profit ?? r.total_profit_ptr ?? r.profit_ptr ?? '');
-    const td_pf = document.createElement('td');
-    // 필요하면 포맷: td_pf.textContent = Number(profit || 0).toFixed(2);
-    td_pf.textContent = Number(profit || 0).toFixed(2);
-    //td_pf.textContent = profit;
-    td_pf.className = 'right';
+    const td_pf = document.createElement('td'); td_pf.textContent = Number(profit || 0).toFixed(2); td_pf.className = 'right';
 
-
-
-    const td_par  = document.createElement('td'); td_par.textContent  = r.param_summary ?? '';
+    const td_par = document.createElement('td'); td_par.textContent = r.param_summary ?? '';
 
     tr.appendChild(td_rank); tr.appendChild(td_case); tr.appendChild(td_wr);
     tr.appendChild(td_wc); tr.appendChild(td_tc); tr.appendChild(td_pf); tr.appendChild(td_par);
@@ -492,6 +488,7 @@ function renderTable(items, token){
   document.getElementById('status').textContent = 'Rows: ' + filtered.length;
 }
 
+/* 로드 & 페이저 */
 async function reload(){
   const status = document.getElementById('status');
   status.textContent = 'Loading...';
@@ -504,7 +501,6 @@ async function reload(){
     window.__pages = data.pages || 0;
     renderTable(items, document.getElementById('filter').value.trim());
     const page = Number(document.getElementById('page').value || '1');
-    const ps   = Number(document.getElementById('limit').value || '200');
     status.textContent = `Page ${page}/${window.__pages || 0} • Rows on page: ${items.length} • Total: ${window.__total}`;
     document.getElementById('prevPageBtn').classList.toggle('disabled-btn', page <= 1);
     document.getElementById('nextPageBtn').classList.toggle('disabled-btn', window.__pages && page >= window.__pages);
@@ -514,114 +510,70 @@ async function reload(){
   }
 }
 
-// 현재 팝업에 띄운 행을 보관 (APPLY 때 재사용)
 let __lastSelectedDetailRow = null;
+let __lastCombinedPayload = null;
 
-// 행 클릭 시 이 변수에 담도록, 기존 클릭핸들러에서 설정하세요.
-// (이미 답변에서 tr.addEventListener('click', ...) 안에 SQL 생성하는 부분이 있는데,
-//  그 위/아래에 아래 한 줄을 넣어주면 됩니다.)
-// __lastSelectedDetailRow = r;
-
-// ----- 슬롯 → is_s1m1_avg{period} 플래그 확장용 유틸 -----
-function expandAvgFlagsFromSlots(raw){
-  // slot1 = s1m1_entry_avg1, dist = s1m1_entry_avg2
-  const slot1_raw = raw['s1m1_entry_avg1'];
-  const dist_raw  = raw['s1m1_entry_avg2'];
-  const picked = new Set();
-
-  if (slot1_raw !== null && slot1_raw !== undefined && !Number.isNaN(Number(slot1_raw))){
-    const idx1 = Math.max(0, Math.min(PERIODS.length-1, Math.floor(Number(slot1_raw))));
-    picked.add(PERIODS[idx1]);
-    if (dist_raw !== null && dist_raw !== undefined && !Number.isNaN(Number(dist_raw))){
-      const idx2 = Math.max(0, Math.min(PERIODS.length-1, idx1 + Math.floor(Number(dist_raw))));
-      picked.add(PERIODS[idx2]);
-    }
-  }
-
-  // 모든 period에 대해 0/1 구성
-  const flags = {};
-  if (picked.size > 0){
-    for (const p of PERIODS){
-      flags[`is_s1m1_avg${p}`] = picked.has(p) ? 1 : 0;
-    }
-  }
-  return flags;
-}
-
-// ----- APPLY용 payload 생성 (서버에 안전한 JSON 전송) -----
-function buildApplyPayload(item, envNo){
-  const raw = buildParamMap(item);
-
-  // 1) 일반 파라미터(AVG1/AVG2 제외)
-  const updates = {};
-  for (const [k, v] of Object.entries(raw)){
-    if (k === 's1m1_entry_avg1' || k === 's1m1_entry_avg2') continue; // 별도 처리
-    if (v === null || v === undefined) continue;
-    const num = Number(v);
-    if (!Number.isNaN(num)) updates[k] = num;
-  }
-
-  // 2) AVG 슬롯 → is_s1m1_avg{period} 0/1 세트
-  const flags = expandAvgFlagsFromSlots(raw);
-  Object.assign(updates, flags);
-
-  return { env_no: envNo, updates };
-}
-
-// 기존 버튼 핸들러들 밑에 호출
+/* 정렬 헤더 초기화 */
 setupSortHeaders();
 
-// ----- APPLY 버튼 핸들러 -----
-const applyBtn = document.getElementById('applySqlBtn');
-applyBtn.addEventListener('click', async () => {
-  try{
-    const item = __lastSelectedDetailRow;
-    if (!item) {
-      alert('No row selected.');
-      return;
-    }
-    const envNo = parseInt(document.getElementById('envNo').value, 10) || 0;
-    if (!envNo) {
-      alert('Invalid env_no');
-      return;
-    }
+/* APPLY 버튼 */
 
-    // 확인
+document.getElementById('applySqlBtn').addEventListener('click', async () => {
+  try{
+    const envNo = parseInt(document.getElementById('envNo').value, 10) || 0;
+    if (!envNo) { alert('Invalid env_no'); return; }
     if (!confirm(`Apply updates to alpha.alpha_env (env_no=${envNo}) ?`)) return;
 
-    const payload = buildApplyPayload(item, envNo);
+    // Prefer server-combined payload when available
+    let payload = __lastCombinedPayload;
+    if (!payload) {
+      const item = __lastSelectedDetailRow;
+      if (!item) { alert('No row selected.'); return; }
+
+      // Fallback to local single row updates
+      const raw = buildParamMap(item);
+      applyAvgSlotConversion(raw);
+      const updates = {};
+      for (const [k, v] of Object.entries(raw)){
+        if (k === 's1m1_entry_avg1' || k === 's1m1_entry_avg2') continue;
+        if (v === null || v === undefined) continue;
+        const num = Number(v);
+        if (!Number.isNaN(num)) updates[k] = num;
+      }
+      const slot1_raw = raw['s1m1_entry_avg1'];
+      const dist_raw  = raw['s1m1_entry_avg2'];
+      const picked = new Set();
+      if (slot1_raw !== null && slot1_raw !== undefined && !Number.isNaN(Number(slot1_raw))){
+        const idx1 = Math.max(0, Math.min(PERIODS.length-1, Math.floor(Number(slot1_raw))));
+        picked.add(PERIODS[idx1]);
+        if (dist_raw !== null && dist_raw !== undefined && !Number.isNaN(Number(dist_raw))){
+          const idx2 = Math.max(0, Math.min(PERIODS.length-1, idx1 + Math.floor(Number(dist_raw))));
+          picked.add(PERIODS[idx2]);
+        }
+      }
+      if (picked.size > 0){
+        for (const p of PERIODS) updates[`is_s1m1_avg${p}`] = picked.has(p) ? 1 : 0;
+      }
+      payload = { env_no: envNo, updates };
+    }
 
     const res = await fetch('/api/apply_env_update', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-
     const js = await res.json().catch(() => ({}));
-
     if (!res.ok || !js.ok){
       const msg = js && js.error ? js.error : `HTTP ${res.status}`;
       alert('Apply failed: ' + msg + '\n(If disabled, set ALPHA_ENABLE_APPLY=1 and restart)');
       return;
     }
-
     alert(`Apply OK (updated ${js.rowcount} row, cols=${(js.updated_columns||[]).length})`);
   }catch(e){
     alert('Apply error: ' + (e.message || e));
   }
 });
 
-
-
-
-
-
-
-
-
-
-
-// ---- pager & inputs ----
+/* 페이저 & 입력 이벤트 */
 document.getElementById('prevPageBtn').addEventListener('click', () => {
   const pageEl = document.getElementById('page');
   let p = parseInt(pageEl.value||'1',10);
@@ -646,32 +598,24 @@ document.getElementById('filter').addEventListener('input', () => {
   renderTable(items, document.getElementById('filter').value.trim());
 });
 document.getElementById('copySqlBtn').addEventListener('click', async () => {
-  const ta = document.getElementById('sqlText');
-  ta.select();
+  const ta = document.getElementById('sqlText'); ta.select();
   try { await navigator.clipboard.writeText(ta.value); } catch(e){}
 });
 document.getElementById('closeSqlBtn').addEventListener('click', () => {
   const dlg = document.getElementById('sqlDialog');
-  if (typeof dlg.close === 'function') dlg.close();
-  else dlg.removeAttribute('open');
+  if (typeof dlg.close === 'function') dlg.close(); else dlg.removeAttribute('open');
 });
 
-//(async () => { loadStateFromURL(); try{ await reload(); } catch(e){ document.getElementById('status').textContent = 'Error: ' + e.message; }})();
+/* 초기 로드 */
 (async () => {
   try {
-    await reload();           // 데이터 로드 + 렌더
-    updateHeaderSortUI();     // 기본 정렬 화살표 표시
+    await reload();
+    updateHeaderSortUI();
   } catch (e) {
     document.getElementById('status').textContent = 'Error: ' + e.message;
   }
 })();
-
-
-
-
-
 </script>
 </body>
 </html>
-
 

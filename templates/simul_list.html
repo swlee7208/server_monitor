@@ -5,69 +5,101 @@
   <meta charset="UTF-8">
   <title>Alpha Cuda Simul</title>
   <style>
+    /* === paramset.html 스타일과 일치 === */
     body { font-family: Arial, sans-serif; margin: 0; }
     nav { background:#343a40; padding:10px; display:flex; gap:20px; }
     nav a { color:#fff; text-decoration:none; font-weight:bold; }
     nav a:hover { text-decoration:underline; }
-    .container { padding:20px; }
-    .toolbar { display:flex; align-items:center; gap:12px; margin:6px 0 14px 0; flex-wrap:wrap; }
-    .toolbar label { font-size:12px; color:#333; }
-    .toolbar input, .toolbar select, .toolbar button { padding:4px 6px; }
 
-    table { width:100%; border-collapse: collapse; }
-    th, td { border:1px solid #e1e1e1; padding:6px 8px; font-size:12px; }
-    th { background:#f5f6f7; text-align:left; }
-    tr:hover { background:#fafafa; }
-    tr.data-row { cursor: pointer; }
+    .container { padding:16px; }                 /* 동일 */
+    .row { display:flex; gap:16px;               /* 상단 입력부 레이아웃 */
+            align-items:flex-end; flex-wrap:wrap; }
+    .card { background:#f8f9fa; border-radius:8px; padding:12px; margin-bottom:14px; }
+    .card h3 { margin:4px 0 10px 0; font-size:16px; }
+
+    label { font-size:12px; color:#333; display:block; margin-bottom:4px; }
+    input[type="text"], select {
+      width:100%; padding:6px; box-sizing:border-box; border:1px solid #ccc; border-radius:6px;
+    }
+
+    .btnbar { display:flex; gap:8px; margin-top:0; flex-wrap:wrap; }
+    button { padding:7px 12px; border-radius:6px; border:1px solid #888; background:#fff; cursor:pointer; }
+    button.primary { background:#2b7cff; color:#fff; border-color:#2b7cff; }
+
+    table { width:100%; border-collapse:collapse; }
+    th, td { border-bottom:1px solid #e3e3e3; padding:6px 8px; font-size:13px; }
+    th { text-align:left; background:#f5f6f7; }
+    tr:hover { background:#f1f5ff; cursor:pointer; }
+
     .right { text-align:right; }
-    .muted { color:#777; }
+    .muted { color:#666; font-size:12px; }
+    .nav-center { display: flex; justify-content: center; }
   </style>
 </head>
 <body>
 
-<nav>
-  <a href="/">Server Monitor</a>
-  <a href="/cuda">Alpha Cuda Simul</a>
-  <a href="/simul">Simulation Regist</a>
-  <a href="/paramset">Parameta Set Regist</a>
+<nav class="nav-center">
+    <a href="/">Monitoring</a>
+    <a href="/cuda">Cuda Simul</a>
+    <a href="/simul">Simul Reg</a>
+    <a href="/paramset">Param Reg</a>
 </nav>
 
 
 <div class="container">
-  <h4>Alpha Cuda Simul — Simulation List</h4>
+  <h4 style="margin: 8px 0 10px 2px;">Alpha Cuda Simul — Simulation List</h4>
 
-  <div class="toolbar">
-    <label>Max Rows:
-      <select id="limit">
-        <option value="50">50</option>
-        <option value="100" selected>100</option>
-        <option value="200">200</option>
-        <option value="500">500</option>
-        <option value="1000">1000</option>
-      </select>
-    </label>
-    <label>Filter (Name / Type / ID):
-      <input type="text" id="filter" placeholder="">
-    </label>
-    <button id="reloadBtn">Reload</button>
-    <span id="status" class="muted"></span>
+  <!-- 상단 입력부: paramset과 동일한 카드/row 구성 -->
+  <div class="card">
+    <div class="row">
+      <div>
+        <label>Max Rows</label>
+        <select id="limit">
+          <option value="50">50</option>
+          <option value="100" selected>100</option>
+          <option value="200">200</option>
+          <option value="500">500</option>
+          <option value="1000">1000</option>
+        </select>
+      </div>
+
+      <div style="min-width:240px;">
+        <label>Filter (Name / Type / ID)</label>
+        <input type="text" id="filter" placeholder="">
+      </div>
+
+      <div>
+        <label>&nbsp;</label>
+        <div class="btnbar">
+          <button id="reloadBtn" class="primary">Reload</button>
+        </div>
+      </div>
+
+      <div style="margin-left:auto">
+        <div class="muted" id="status">Rows: 0</div>
+      </div>
+    </div>
   </div>
 
-  <table id="simulTable">
-    <thead>
-      <tr>
-        <th>simul_id</th>
-        <th>simul_type</th>
-        <th>main_simul_id</th>
-        <th>simul_name</th>
-        <th>from_date</th>
-        <th>to_date</th>
-        <th class="right">case_cnt</th>
-        <th>end_time</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+  <!-- 리스트: paramset 테이블 스타일로 통일 -->
+  <div class="card">
+    <h3>시뮬레이션 리스트</h3>
+    <table id="simulTable">
+      <thead>
+        <tr>
+          <th>simul_id</th>
+          <th>simul_type</th>
+          <th>main_simul_id</th>
+          <th>simul_name</th>
+          <th>from_date</th>
+          <th>to_date</th>
+          <th class="right">case_cnt</th>
+          <th>end_time</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
 </div>
 
 <script>
@@ -98,14 +130,14 @@ function renderTable(items, token){
     const tr = document.createElement('tr');
     tr.className = 'data-row';
 
-    // 행 클릭 → 상세 페이지 이동 (문자열 연결 사용)
+    // 행 클릭 → 상세 페이지 이동
     tr.addEventListener('click', () => {
       if (r.simul_id != null) {
         window.location.href = '/cuda/' + r.simul_id;
       }
     });
 
-    // 첫 셀: 명시적 링크(백업)
+    // 첫 셀 링크(백업)
     const td_id = document.createElement('td');
     const a = document.createElement('a');
     a.href = '/cuda/' + (r.simul_id ?? '');
