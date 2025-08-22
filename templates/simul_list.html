@@ -15,6 +15,8 @@
     .row { display:flex; gap:16px;               /* 상단 입력부 레이아웃 */
             align-items:flex-end; flex-wrap:wrap; }
     .card { background:#f8f9fa; border-radius:8px; padding:12px; margin-bottom:14px; }
+    .card .input { font-size: 14px; }
+    .card select.input { font-size: 12px; padding: 7px 12px; height: auto; }
     .card h3 { margin:4px 0 10px 0; font-size:16px; }
 
     label { font-size:12px; color:#333; display:block; margin-bottom:4px; }
@@ -47,14 +49,14 @@
 
 
 <div class="container">
-  <h4 style="margin: 8px 0 10px 2px;">Alpha Cuda Simul — Simulation List</h4>
+  <h4 style="margin: 8px 0 10px 2px;">Alpha Cuda :: Simulation List</h4>
 
   <!-- 상단 입력부: paramset과 동일한 카드/row 구성 -->
   <div class="card">
     <div class="row">
       <div>
         <label>Max Rows</label>
-        <select id="limit">
+        <select id="limit" class="input">
           <option value="50">50</option>
           <option value="100" selected>100</option>
           <option value="200">200</option>
@@ -65,13 +67,13 @@
 
       <div style="min-width:240px;">
         <label>Filter (Name / Type / ID)</label>
-        <input type="text" id="filter" placeholder="">
+        <input type="text" id="filter"  class="input">
       </div>
 
       <div>
         <label>&nbsp;</label>
         <div class="btnbar">
-          <button id="reloadBtn" class="primary">Reload</button>
+          <button id="reloadBtn" class="primary btn lg">Reload</button>
         </div>
       </div>
 
@@ -83,20 +85,19 @@
 
   <!-- 리스트: paramset 테이블 스타일로 통일 -->
   <div class="card">
-    <h3>시뮬레이션 리스트</h3>
     <table id="simulTable">
       <thead>
         <tr>
           <th>id</th>
-          <th>simul_type</th>
+          <th>simul type</th>
           <th class="right">m.id</th>
           <th class="right">m.gid</th>
-          <th>simul_name</th>
-          <th class="right">from_date</th>
-          <th class="right">to_date</th>
+          <th>simul name</th>
+          <th class="right">from</th>
+          <th class="right">to</th>
           <th class="right">case</th>
-          <th class="right">start_time</th>
-          <th class="right">end_time</th>
+          <th class="right">start</th>
+          <th class="right">finish</th>
           <th class="right">progress</th>
           <th class="right">status</th>
         </tr>
@@ -137,7 +138,9 @@ function renderTable(items, token){
     // 행 클릭 → 상세 페이지 이동
     tr.addEventListener('click', () => {
       if (r.simul_id != null) {
-        window.location.href = '/cuda/' + r.simul_id;
+        //window.location.href = '/cuda/' + r.simul_id;
+        const name = encodeURIComponent(r.simul_name ?? '');
+        window.location.href = `/cuda/${r.simul_id}?simul_name=${name}`;
       }
     });
 
@@ -151,7 +154,7 @@ function renderTable(items, token){
     const td_type = document.createElement('td'); td_type.textContent = r.simul_type === 0 ? "주전략" : (r.simul_type === 1 ? "혼잡도조합" : "");
     const td_pid  = document.createElement('td'); td_pid.textContent  = r.main_simul_id ?? '';
     td_pid.classList.add("right");
-    const td_gid  = document.createElement('td'); td_gid.textContent  = r.main_top_rank ?? '';
+    const td_gid  = document.createElement('td'); td_gid.textContent  = r.main_simul_gid ?? '';
     td_gid.classList.add("right");
     const td_name = document.createElement('td'); td_name.textContent = r.simul_name ?? '';
     const td_fd   = document.createElement('td'); td_fd.textContent   = r.simul_from_date ?? '';

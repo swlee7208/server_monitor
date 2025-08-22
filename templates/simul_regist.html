@@ -1,7 +1,7 @@
-
 <!DOCTYPE html>
 <html>
 <head>
+  <link rel="stylesheet" href="/static/app.css">
   <meta charset="UTF-8">
   <title>Simulation Regist</title>
   <style>
@@ -12,6 +12,9 @@
     .container { padding:16px; }
     .row { display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; }
     .card { background:#f8f9fa; border-radius:8px; padding:12px; margin-bottom:14px; }
+    .card .input { font-size: 14px; }
+    .card select.input { font-size: 12px; padding: 7px 12px; height: auto; }
+
     .card h3 { margin:4px 0 10px 0; font-size:16px; }
     .grid { display:grid; grid-template-columns:repeat(6, 1fr); gap:10px; }
     .grid .col-2 { grid-column: span 2; }
@@ -37,9 +40,9 @@
     .right { text-align:right; }
     .left { text-align:left; }
   </style>
-  <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+
 <nav class="nav-center">
     <a href="/">Monitoring</a>
     <a href="/cuda">Cuda Simul</a>
@@ -49,12 +52,12 @@
 
 
 <div class="container">
+    <h4 style="margin: 8px 0 10px 2px;">Alpha Cuda :: Simulation Regist</h4>
 
     <div class="card">
-      <h3>Simulation Regist</h3>
 
       <div class="form-grid">
-        <div class="field">
+        <div class="field" >
           <label for="f_id">simul_id</label>
           <input id="f_id" class="input" type="number">
         </div>
@@ -95,26 +98,34 @@
 
         <div>
           <label for="f_candle">simul_candle</label>
-          <input id="f_candle" type="number" />
+          <input id="f_candle" class="input" type="number" />
         </div>
 
-        <div>
-          <label for="f_main">main_simul_id</label>
-          <input id="f_main" type="number" />
-        </div>
-
-        <div>
-          <label for="f_top">main_top_rank</label>
-          <input id="f_top" type="number" />
-        </div>
-
-
-
-
-        <div class="col-2">
+        <div class="field">
           <label for="f_reason">reason</label>
-          <input id="f_reason" type="text" placeholder="변경 사유 / 메모" />
+          <input id="f_reason" class="input" type="text" >
         </div>
+        <div  class="field">
+          <label for="f_main">main_simul_id</label>
+          <input id="f_main" class="input" type="number" />
+        </div>
+
+        <div>
+          <label for="f_top">main_simul_gid</label>
+          <input id="f_top" class="input" type="number" />
+        </div>
+
+
+        <div> </div>
+        <div class="btnbar field-buttons">
+          <button id="btnAdd" class="primary btn lg">Add</button>
+          <button id="btnSave" class="primary btn lg">Save</button>
+          <button id="btnClear" class="btn lg">Clear</button>
+          <button id="btnReload" class="btn lg">Reload</button>
+        </div>
+
+        <div> </div>
+
 
 
         <div class="field">
@@ -126,20 +137,11 @@
         </div>
       </div>
 
-      <div class="btnbar">
-        <button id="btnAdd"    class="btn" type="button">Add</button>
-        <button id="btnSave"   class="btn primary" type="button">Save</button>
-        <button id="btnClear"  class="btn" type="button">Clear</button>
-        <button id="btnReload" class="btn" type="button">Reload</button>
-      </div>
-
-
 
     </div>
 
     <!-- 리스트 -->
     <div class="card" >
-      <h3>시뮬레이션 리스트</h3>
       <table id="tbl">
         <thead>
           <tr>
@@ -149,7 +151,8 @@
             <th class="right">m.gid</th>
             <th class="left">simul name</th>
             <th class="right">reg time</th>
-            <th class="right">simul period</th>
+            <th class="right">from</th>
+            <th class="right">to</th>
             <th class="right">psid</th>  <!-- param_set_id -->
             <th class="right">active</th>
             <th class="right">status</th>
@@ -209,7 +212,7 @@ function rowHtml(r){
   const sid   = (r.simul_id ?? '') + '';
   const typeV = Number(r.simul_type ?? 0); const typeS = typeName(typeV);
   const mid   = (r.main_simul_id ?? '') + '';
-  const mgid  = (r.main_top_rank ?? '') + '';
+  const mgid  = (r.main_simul_gid ?? '') + '';
   const name  = r.simul_name || '';
   const regS  = r.reg_time || '';
   const fromS = r.simul_from_date || '';
@@ -229,7 +232,7 @@ function rowHtml(r){
   const candle = r.simul_candle ?? '';
   const desc   = (r.simul_desc || '').replace(/"/g, '&quot;');
   const main   = r.main_simul_id ?? '';
-  const top    = r.main_top_rank ?? '';
+  const top    = r.main_simul_gid ?? '';
 
   return `<tr
     data-id="${sid}"
@@ -250,7 +253,8 @@ function rowHtml(r){
     <td class="right">${mgid}</td>
     <td>${name}</td>
     <td class="right">${regS}</td>
-    <td class="right">${span}</td>
+    <td class="right">${fromS}</td>
+    <td class="right">${toS}</td>
     <td class="right">${pid}</td>
     <td class="right">${actHtml}</td>     <!-- ← 뱃지 표시 -->
     <td class="right">${status}</td>
@@ -263,8 +267,10 @@ function rowHtml(r){
     const idText   = (tds[0]?.innerText || '').trim();
     const nameText = (tds[4]?.innerText || '').trim();
     const typeText = (tds[1]?.innerText || '').trim();
-    const period   = (tds[6]?.innerText || '').trim();
-    const pidText  = (tds[7]?.innerText || '').trim();
+    //const period   = (tds[6]?.innerText || '').trim();
+    const fromDt   = (tds[6]?.innerText || '').trim();
+    const toDt     = (tds[7]?.innerText || '').trim();
+    const pidText  = (tds[8]?.innerText || '').trim();
     const actText  = (tds[9]?.innerText || '').trim();
     const d = tr.dataset;
 
@@ -272,9 +278,11 @@ function rowHtml(r){
     f_name.value = nameText;
     f_type.value = (typeText.includes('기본전략')) ? '0' : '1';
 
-    const parts = period.split('~');
-    f_from.value = (parts[0]||'').trim();
-    f_to.value   = (parts[1]||'').trim();
+    //const parts = period.split('~');
+    //f_from.value = (parts[0]||'').trim();
+    //f_to.value   = (parts[1]||'').trim();
+    f_from.value = fromDt;
+    f_to.value   = toDt;
 
     f_param.value  = (pidText === '-' ? '' : pidText);
     //f_active.value = (actText.includes('(1)')) ? '1' : '0';
@@ -334,7 +342,7 @@ function rowHtml(r){
       simul_candle:    f_candle.value ? Number(f_candle.value) : null,
       simul_type:      Number(f_type.value),
       main_simul_id:   f_main.value ? Number(f_main.value) : null,
-      main_top_rank:   f_top.value ? Number(f_top.value) : null,
+      main_simul_gid:  f_top.value ? Number(f_top.value) : null,
       param_set_id:    f_param.value ? Number(f_param.value) : null,
       is_active:       Number(f_active.value),
       reason:          f_reason.value
@@ -356,7 +364,7 @@ function rowHtml(r){
       simul_candle:    f_candle.value ? Number(f_candle.value) : null,
       simul_type:      Number(f_type.value),
       main_simul_id:   f_main.value ? Number(f_main.value) : null,
-      main_top_rank:   f_top.value ? Number(f_top.value) : null,
+      main_simul_gid:  f_top.value ? Number(f_top.value) : null,
       param_set_id:    f_param.value ? Number(f_param.value) : null,
       is_active:       Number(f_active.value),
       reason:          f_reason.value

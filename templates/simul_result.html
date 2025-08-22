@@ -14,6 +14,9 @@
     .container { padding:16px; }
     .row { display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; }
     .card { background:#f8f9fa; border-radius:8px; padding:12px; margin-bottom:14px; }
+    .card .input { font-size: 14px; }
+    .card select.input { font-size: 12px; padding: 7px 12px; height: auto; }
+
     .card h3 { margin:4px 0 10px 0; font-size:16px; }
 
     label { font-size:12px; color:#333; display:block; margin-bottom:4px; }
@@ -53,7 +56,11 @@
 
 
 <div class="container">
-  <h4 style="margin: 8px 0 10px 2px;">Simulation Detail — simul_id: <span id="simulId">{{ simul_id }}</span></h4>
+  <h4 style="margin: 8px 0 10px 2px;">
+      Alpha Cuda :: Simulation Result ( <span id="simulId">{{ simul_id }}</span> ) :
+      <span id="simulName" style="margin-left:12px; color:#555;"></span>
+  </h4>
+
 
   <!-- 상단 입력부: 카드 + 두 줄(row) 구성 -->
   <div class="card">
@@ -61,7 +68,7 @@
     <div class="row">
       <div style="min-width:140px;">
         <label>Max Rows</label>
-        <select id="limit">
+        <select class="input" id="limit">
           <option value="100">100</option>
           <option value="200" selected>200</option>
           <option value="500">500</option>
@@ -71,24 +78,21 @@
 
       <div style="min-width:300px; flex:1;">
         <label>Filter (case / params)</label>
-        <input type="text" id="filter" placeholder="">
+        <input class="input" type="text" id="filter" placeholder="">
       </div>
 
       <div style="min-width:120px;">
         <label>env_no</label>
-        <input type="number" id="envNo" value="5">
+        <input class="input" type="number" id="envNo" value="5">
       </div>
 
       <div>
         <label>&nbsp;</label>
         <div class="btnbar">
-          <button id="reloadBtn" class="primary">Reload</button>
+          <button id="reloadBtn" class="btn lg">Reload</button>
         </div>
       </div>
 
-      <div style="margin-left:auto">
-        <div class="muted" id="status">Rows: 0</div>
-      </div>
     </div>
 
     <!-- 2행: 범위/페이지 -->
@@ -96,27 +100,27 @@
       <div>
         <label>Win Rate (%)</label>
         <div style="display:flex; gap:6px;">
-          <input type="number" id="winMin" style="width:90px;" placeholder="min">
+          <input class="input" type="number" id="winMin" style="width:90px;" >
           <span style="align-self:center;">~</span>
-          <input type="number" id="winMax" style="width:90px;" placeholder="max">
+          <input class="input" type="number" id="winMax" style="width:90px;" >
         </div>
       </div>
 
       <div>
         <label>Profit</label>
         <div style="display:flex; gap:6px;">
-          <input type="number" id="profitMin" style="width:110px;" placeholder="min">
+          <input class="input" type="number" id="profitMin" style="width:110px;" >
           <span style="align-self:center;">~</span>
-          <input type="number" id="profitMax" style="width:110px;" placeholder="max">
+          <input class="input" type="number" id="profitMax" style="width:110px;" >
         </div>
       </div>
 
       <div>
-        <label>Trade cnt</label>
+        <label>Trade Count</label>
         <div style="display:flex; gap:6px;">
-          <input type="number" id="tradesMin" style="width:110px;" placeholder="min">
+          <input class="input" type="number" id="tradesMin" style="width:110px;" >
           <span style="align-self:center;">~</span>
-          <input type="number" id="tradesMax" style="width:110px;" placeholder="max">
+          <input class="input" type="number" id="tradesMax" style="width:110px;" >
         </div>
       </div>
 
@@ -125,17 +129,21 @@
       <div>
         <label>Page</label>
         <div style="display:flex; gap:6px; align-items:center;">
-          <input type="number" id="page" value="1" style="width:80px;">
-          <button id="prevPageBtn">Prev</button>
-          <button id="nextPageBtn">Next</button>
+          <input class="input" type="number" id="page" value="1" style="width:80px;">
+          <button class="input" id="prevPageBtn">Prev</button>
+          <button class="input" id="nextPageBtn">Next</button>
         </div>
       </div>
     </div>
   </div>
 
+  <div class="right" style="margin-left:auto">
+    <div class="muted" id="status">Rows: 0</div>
+  </div>
+  <br>
+
   <!-- 리스트 카드 -->
   <div class="card">
-    <h3>결과 리스트</h3>
     <table id="detailTable">
       <thead>
         <tr>
@@ -235,6 +243,14 @@ if (!Number.isFinite(simulId) || simulId < 0) {
   const fromQ = Number(qp.get('simul_id'));
   if (Number.isFinite(fromQ) && fromQ > 0) simulId = fromQ;
 }
+
+let simulName = null;
+{
+  const qp = new URLSearchParams(window.location.search);
+  const fromQ = qp.get('simul_name');
+  if (fromQ) simulName = decodeURIComponent(fromQ);
+}
+
 
 /* 평균기간 슬롯 매핑 */
 const PERIODS = [3,5,7,10,15,20,25,30,35,40,45,50,55,60,70,80,120];
@@ -443,7 +459,7 @@ function renderTable(items, token){
         if (meta){
           const mt = js.simul_type;
           const msid = js.main_simul_id ?? null;
-          const mgid = js.main_gid ?? js.main_top_rank ?? null;
+          const mgid = js.main_gid ?? js.main_simul_gid ?? null;
           const ssid = js.sub_simul_id ?? simulId;
           const sgid = js.sub_gid ?? gid;
           const badge = (k,v)=>`<span style="padding:2px 6px;border:1px solid #999;border-radius:999px;">${k}: <b>${v}</b></span>`;
@@ -500,10 +516,14 @@ async function reload(){
     window.__total = data.total || 0;
     window.__pages = data.pages || 0;
     renderTable(items, document.getElementById('filter').value.trim());
+
     const page = Number(document.getElementById('page').value || '1');
-    status.textContent = `Page ${page}/${window.__pages || 0} • Rows on page: ${items.length} • Total: ${window.__total}`;
+    //status.textContent = `Page ${page}/${window.__pages || 0} • Rows on page: ${items.length} • Total: ${window.__total}`;
+    status.textContent = `Page ${page}/${window.__pages || 0} • Total: ${window.__total}`;
+
     document.getElementById('prevPageBtn').classList.toggle('disabled-btn', page <= 1);
     document.getElementById('nextPageBtn').classList.toggle('disabled-btn', window.__pages && page >= window.__pages);
+
   }catch(err){
     status.textContent = 'Error: ' + err.message;
     console.error(err);
@@ -573,6 +593,11 @@ document.getElementById('applySqlBtn').addEventListener('click', async () => {
   }
 });
 
+if (simulName) {
+  document.getElementById('simulName').textContent = `${simulName}`;
+}
+
+
 /* 페이저 & 입력 이벤트 */
 document.getElementById('prevPageBtn').addEventListener('click', () => {
   const pageEl = document.getElementById('page');
@@ -605,6 +630,7 @@ document.getElementById('closeSqlBtn').addEventListener('click', () => {
   const dlg = document.getElementById('sqlDialog');
   if (typeof dlg.close === 'function') dlg.close(); else dlg.removeAttribute('open');
 });
+
 
 /* 초기 로드 */
 (async () => {

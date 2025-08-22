@@ -56,7 +56,7 @@ SIMUL_LIST_EXPECTED = [
     'simul_desc',
     'main_simul_id',
     'param_set_id',
-    'main_top_rank',
+    'main_simul_gid',
     'simul_name',
     'simul_from_date',
     'simul_to_date',
@@ -82,7 +82,7 @@ SIMUL_WRITE_FIELDS = [
     'is_active',
     'status',
     'main_simul_id',
-    'main_top_rank',
+    'main_simul_gid',
     'simul_candle',
     'simul_desc',
     'reason'
@@ -171,7 +171,7 @@ def _clean_simul_payload(raw: dict) -> dict:
             continue
         v = raw[k]
         if k in ('simul_id', 'simul_candle', 'simul_type','simul_candle',
-                 'main_simul_id', 'main_top_rank', 'param_set_id', 'is_active'):
+                 'main_simul_id', 'main_simul_gid', 'param_set_id', 'is_active'):
             data[k] = None if v is None or str(v).strip() == '' else int(v)
         elif k in ('simul_from_date', 'simul_to_date', 'reg_time'):
             data[k] = _parse_ts(v)
@@ -285,11 +285,19 @@ def fetch_simul_list(limit=200):
         elif 'reg_time' in cols:
             order_prefix = 'reg_time DESC NULLS LAST,'
 
+        #sql = f'''
+            #SELECT {select_list}
+            #FROM {qualify(SIMUL_TABLE)}
+            #ORDER BY
+                #{order_prefix}
+                #simul_id DESC
+            #LIMIT %s
+        #'''
+
         sql = f'''
             SELECT {select_list}
             FROM {qualify(SIMUL_TABLE)}
             ORDER BY
-                {order_prefix}
                 simul_id DESC
             LIMIT %s
         '''
@@ -302,8 +310,8 @@ def fetch_simul_list(limit=200):
         for k in ('simul_from_date', 'simul_to_date', 'end_time', 'reg_time','start_time', 'end_time'):
             if k in r and r[k] is not None:
                 if isinstance(r[k], datetime):
-                    r[k] = r[k].strftime('%Y-%m-%d %H:%M') if k in ('start_time', 'end_time') else r[k].strftime('%Y-%m-%d')
-                    #r[k] = r[k].strftime('%Y-%m-%d %H:%M:%S')
+                    #r[k] = r[k].strftime('%Y-%m-%d %H:%M') if k in ('start_time', 'end_time') else r[k].strftime('%Y-%m-%d')
+                    r[k] = r[k].strftime('%Y-%m-%d %H:%M')
                 else:
                     r[k] = str(r[k])
     return rows
@@ -987,7 +995,7 @@ def _row_to_param_map_py(row: dict) -> dict:
 def _fetch_simul_meta(simul_id: int):
     with get_pg_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
         sql = f'''
-            SELECT simul_id, simul_type, main_simul_id, main_top_rank
+            SELECT simul_id, simul_type, main_simul_id, main_simul_gid
             FROM {qualify(SIMUL_TABLE)}
             WHERE simul_id = %s
         '''
@@ -1089,17 +1097,17 @@ def api_combined_env_update():
         meta = _fetch_simul_meta(sub_simul_id)
         simul_type   = int(meta.get('simul_type') or 0)
         main_simul_id = meta.get('main_simul_id')
-        main_top_rank = meta.get('main_top_rank')
+        main_simul_gid = meta.get('main_simul_gid')
 
         if simul_type == 0:
             row = _fetch_result_row(sub_simul_id, gid)
             main_map = _row_to_param_map_py(row)
             sql, updates = _build_updates_from_maps(env_no, main_map, {})
         else:
-            if not main_simul_id or not main_top_rank:
-                return jsonify({'ok': False, 'error': 'Missing main_simul_id/main_top_rank in simul table'}), 400
+            if not main_simul_id or not main_simul_gid:
+                return jsonify({'ok': False, 'error': 'Missing main_simul_id/main_simul_gid in simul table'}), 400
             row_sub  = _fetch_result_row(sub_simul_id, gid)
-            row_main = _fetch_result_row(int(main_simul_id), int(main_top_rank))
+            row_main = _fetch_result_row(int(main_simul_id), int(main_simul_gid))
             main_map = _row_to_param_map_py(row_main)
             sub_map  = _row_to_param_map_py(row_sub)
             sql, updates = _build_updates_from_maps(env_no, main_map, sub_map)
@@ -1112,7 +1120,7 @@ def api_combined_env_update():
             sub_gid = 0
         else:
             main_id = int(main_simul_id)
-            main_gid = int(main_top_rank)
+            main_gid = int(main_simul_gid)
             sub_id = int(sub_simul_id)
             sub_gid = int(gid)
         updates['simul_id'] = main_id
@@ -1130,8 +1138,8 @@ def api_combined_env_update():
             'updates': updates,
             'simul_type': simul_type,
             'main_simul_id': main_simul_id,
-            'main_top_rank': main_top_rank,
-            'main_gid': (int(main_top_rank) if main_top_rank else None),
+            'main_simul_gid': main_simul_gid,
+            'main_gid': (int(main_simul_gid) if main_simul_gid else None),
             'sub_simul_id': int(sub_simul_id),
             'sub_gid': int(gid)
         })

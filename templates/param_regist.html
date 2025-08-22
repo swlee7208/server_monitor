@@ -12,8 +12,12 @@
     .container { padding:16px; }
     .row { display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; }
     .card { background:#f8f9fa; border-radius:8px; padding:12px; margin-bottom:14px; }
+    .card .input { font-size: 14px; }
+    .card select.input { font-size: 12px; padding: 7px 12px; height: auto; }
     .card h3 { margin:4px 0 10px 0; font-size:16px; }
     .grid { display:grid; grid-template-columns:repeat(6, 1fr); gap:10px; }
+    .grid .input { font-size: 14px; }
+    .grid select.input { font-size: 12px; padding: 7px 12px; height: auto; }
     .grid .col-2 { grid-column: span 2; }
     .grid .col-3 { grid-column: span 3; }
     label { font-size:12px; color:#333; display:block; margin-bottom:4px; }
@@ -34,6 +38,8 @@
     .total { font-weight:bold; color:#222; }
     .muted { color:#666; font-size:12px; }
     .nav-center { display: flex; justify-content: center; }
+    .right { text-align:right; }
+    .left { text-align:left; }
   </style>
 </head>
 <body>
@@ -47,16 +53,17 @@
 
 
 <div class="container">
+  <h4 style="margin: 8px 0 10px 2px;">Alpha Cuda :: Parameta Set Regist</h4>
 
   <div class="card">
     <div class="row">
       <div>
-        <label>Set ID 선택</label>
-        <select id="setIdSelect"></select>
+        <label>Set ID</label>
+        <select class="input" id="setIdSelect"></select>
       </div>
       <div>
         <label>&nbsp;</label>
-        <button id="btnLoad" class="primary">Load</button>
+        <button id="btnLoad"  class="btn lg">Load</button>
       </div>
       <div style="margin-left:auto">
         <div class="total">
@@ -72,81 +79,90 @@
 
   <!-- 입력 폼 -->
   <div class="card">
-    <h3>파라메터 입력 (최대 20개까지)</h3>
     <div class="grid">
       <div>
         <label>set_id</label>
-        <input type="number" id="set_id">
+        <input class="input" type="number" id="set_id">
       </div>
       <div>
         <label>param_no</label>
-        <input type="number" id="param_no" min="0">
+        <input class="input" type="number" id="param_no" min="0">
       </div>
       <div class="col-2">
         <label>param_name</label>
-        <input type="text" id="param_name">
+        <input class="input" type="text" id="param_name">
       </div>
       <div class="col-2">
         <label>param_desc</label>
-        <input type="text" id="param_desc">
+        <input class="input" type="text" id="param_desc">
       </div>
 
       <div>
         <label>data_type</label>
-        <select id="data_type">
+        <select class="input" id="data_type">
           <option value="float">float</option>
           <option value="int">int</option>
         </select>
       </div>
       <div>
         <label>data_min</label>
-        <input type="number" id="data_min" step="0.01">
+        <input class="input" type="number" id="data_min" step="0.01">
       </div>
       <div>
         <label>data_max</label>
-        <input type="number" id="data_max" step="0.01">
+        <input class="input" type="number" id="data_max" step="0.01">
       </div>
       <div>
         <label>data_step_size</label>
-        <input type="number" id="data_step_size" step="0.01">
+        <input class="input" type="number" id="data_step_size" step="0.01">
       </div>
       <div>
         <label>data_cnt (자동계산)</label>
-        <input type="number" id="data_cnt" readonly>
+        <input class="input" type="number" id="data_cnt" readonly>
       </div>
       <div>
         <label>is_active</label>
-        <select id="is_active">
+        <select class="input" id="is_active">
           <option value="1">활성</option>
           <option value="0">비활성</option>
         </select>
       </div>
+
+      <div> </div>
+      <div class="col-3">
+          <label id="avgSlotBox" style="display:none;">AVG SLOT [ 0 ~ 17 ] :: [ 3, 5, 7, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 70, 80, 120 ]</label>
+      </div>
+      <div> </div>
+      <div> </div>
+
+      <div> </div>
+      <div class="btnbar col-3">
+        <button id="btnAdd" class="primary btn lg">Add</button>
+        <button id="btnSave" class="primary btn lg">Save</button>
+        <button id="btnClear" class="btn lg">Clear</button>
+        <button id="btnReload" class="btn lg">Reload</button>
+        <button id="btnDelete" class="danger" hidden>Delete</button>
+      </div>
+
+
     </div>
 
-    <div class="btnbar">
-      <button id="btnAdd" class="primary">Add</button>
-      <button id="btnSave" class="primary">Save</button>
-      <button id="btnClear">Clear</button>
-      <button id="btnReload">Reload</button>
-      <button id="btnDelete" class="danger" hidden>Delete</button>
-    </div>
   </div>
 
   <!-- 리스트 -->
   <div class="card">
-    <h3>파라메터 세트 리스트</h3>
     <table>
       <thead>
         <tr>
-          <th>set_id</th>
-          <th>param_no</th>
-          <th>param_name</th>
-          <th>data_type</th>
-          <th>data_min</th>
-          <th>data_max</th>
-          <th>data_step_size</th>
-          <th>data_cnt</th>
-          <th>is_active</th>
+          <th class="right">set id</th>
+          <th class="right">p.no</th>
+          <th class="left">param name</th>
+          <th class="right">data type</th>
+          <th class="right">data min</th>
+          <th class="right">data max</th>
+          <th class="right">step</th>
+          <th class="right">case</th>
+          <th class="right">active</th>
         </tr>
       </thead>
       <tbody id="listBody"></tbody>
@@ -184,6 +200,17 @@ function setForm(row) {
   $('data_step_size').value= row.data_step_size ?? '';
   $('data_cnt').value      = row.data_cnt ?? '';
   $('is_active').value     = row.is_active ?? 1;
+
+  // === avgSlotBox 표시/숨김 ===
+  const avgBox = document.getElementById('avgSlotBox');
+  if (!avgBox) return;
+
+  const name = (row.param_name || '').toLowerCase(); // 소문자 변환
+  if (name.includes("avg1") || name.includes("avg2")) {
+    avgBox.style.display = "block";  // 보이기
+  } else {
+    avgBox.style.display = "none";   // 숨기기
+  }
 }
 
 function clearForm(keepSetId=true){
@@ -271,15 +298,15 @@ async function loadRows(setId){
     js.items.forEach(r=>{
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td>${r.set_id}</td>
-        <td>${r.param_no}</td>
+        <td class="right">${r.set_id}</td>
+        <td class="right">${r.param_no}</td>
         <td>${r.param_name ?? ''}</td>
-        <td>${r.data_type ?? ''}</td>
-        <td>${r.data_min ?? ''}</td>
-        <td>${r.data_max ?? ''}</td>
-        <td>${r.data_step_size ?? ''}</td>
-        <td>${r.data_cnt ?? ''}</td>
-        <td><span class="badge ${r.is_active==1?'on':'off'}">${r.is_active==1?'ON':'OFF'}</span></td>
+        <td class="right">${r.data_type ?? ''}</td>
+        <td class="right">${r.data_min ?? ''}</td>
+        <td class="right">${r.data_max ?? ''}</td>
+        <td class="right">${r.data_step_size ?? ''}</td>
+        <td class="right">${r.data_cnt ?? ''}</td>
+        <td class="right"><span class="badge ${r.is_active==1?'on':'off'}">${r.is_active==1?'ON':'OFF'}</span></td>
       `;
       tr.addEventListener('click', ()=> setForm(r));
       tbody.appendChild(tr);
@@ -360,6 +387,15 @@ $('btnLoad').addEventListener('click', ()=>{
   $('set_id').value = sid;
   loadRows(sid);
 });
+
+// select 값이 변하면 자동으로 로드
+$('setIdSelect').addEventListener('click', ()=>{
+  const sid = toInt($('setIdSelect').value);
+  $('set_id').value = sid;
+  loadRows(sid);
+});
+
+
 
 // init
 (async function init(){
