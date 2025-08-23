@@ -40,6 +40,9 @@
     .nav-center { display: flex; justify-content: center; }
     .right { text-align:right; }
     .left { text-align:left; }
+
+    #listBody tr.row--active td { color: green !important; font-weight: 700 !important;}
+
   </style>
 </head>
 <body>
@@ -292,11 +295,14 @@ async function loadRows(setId){
   tbody.innerHTML = '';
 
   if (js.ok && js.items){
-    // ✅ 총 경우의 수 + ETA 같이 갱신
     updateTotalAndEta(js.total_cases);
 
     js.items.forEach(r=>{
       const tr = document.createElement('tr');
+
+      // 🔹 is_active==1 이면 행에 클래스 추가
+      const isOn = Number(r.is_active) === 1;
+
       tr.innerHTML = `
         <td class="right">${r.set_id}</td>
         <td class="right">${r.param_no}</td>
@@ -306,8 +312,11 @@ async function loadRows(setId){
         <td class="right">${r.data_max ?? ''}</td>
         <td class="right">${r.data_step_size ?? ''}</td>
         <td class="right">${r.data_cnt ?? ''}</td>
-        <td class="right"><span class="badge ${r.is_active==1?'on':'off'}">${r.is_active==1?'ON':'OFF'}</span></td>
+        <td class="right"><span class="badge ${isOn?'on':'off'}">${isOn?'ON':'OFF'}</span></td>
       `;
+
+      if (isOn) tr.classList.add('row--active');  // ✅ 여기!
+
       tr.addEventListener('click', ()=> setForm(r));
       tbody.appendChild(tr);
     });
@@ -315,9 +324,6 @@ async function loadRows(setId){
     updateTotalAndEta(0);
   }
 }
-
-
-
 
 
 async function saveRow(){
@@ -373,7 +379,7 @@ $('data_type').addEventListener('change', ()=>{
   $('data_step_size').step = step;
 });
 
-$('btnAdd').addEventListener('click', ()=>{ clearForm(true); $('param_no').focus(); });
+$('btnAdd').addEventListener('click', saveRow);
 $('btnSave').addEventListener('click', saveRow);
 $('btnClear').addEventListener('click', ()=> clearForm(false));
 $('btnReload').addEventListener('click', ()=> {

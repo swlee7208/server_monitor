@@ -39,6 +39,19 @@
     .nav-center { display: flex; justify-content: center; }
     .right { text-align:right; }
     .left { text-align:left; }
+
+    /* 기본: 행에 지정한 --row-color를 모든 셀에 적용 */
+    #simulTable tbody tr.data-row td { color: var(--row-color, inherit); }
+    #simulTable tbody tr.data-row a { color: inherit; }
+
+    /* 혹시 다른 스타일이 더 세면 이걸로 강제 */
+    #simulTable tbody tr[data-state="1"] td { color: green !important; }
+    #simulTable tbody tr[data-state="3"] td,
+    #simulTable tbody tr[data-state="4"] td { color: red !important; }
+    #simulTable tbody tr[data-state="1"] a,
+    #simulTable tbody tr[data-state="3"] a,
+    #simulTable tbody tr[data-state="4"] a { color: inherit !important; }
+
   </style>
 </head>
 <body>
@@ -124,12 +137,19 @@
           <button id="btnReload" class="btn lg">Reload</button>
         </div>
 
-        <div> </div>
-
-
+        <div class="field">
+          <label for="f_status">status</label>
+          <select id="f_status" class="input">
+            <option value="0">Ready</option>
+            <option value="1">Running</option>
+            <option value="2">Done</option>
+            <option value="3">Stop</option>
+            <option value="4">Error</option>
+          </select>
+        </div>
 
         <div class="field">
-          <label for="f_active">is_active</label>
+          <label for="f_active">active</label>
           <select id="f_active" class="input">
             <option value="1">활성</option>
             <option value="0">비활성</option>
@@ -177,6 +197,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const f_top    = document.getElementById('f_top');
   const f_param  = document.getElementById('f_param');
   const f_active = document.getElementById('f_active');
+  const f_status = document.getElementById('f_status');
   const f_reason = document.getElementById('f_reason');
 
   const btnAdd    = document.getElementById('btnAdd');
@@ -217,24 +238,35 @@ function rowHtml(r){
   const regS  = r.reg_time || '';
   const fromS = r.simul_from_date || '';
   const toS   = r.simul_to_date || '';
-  const span  = (fromS && toS) ? `${fromS} ~ ${toS}` : (fromS || toS);
   const pid   = (r.param_set_id ?? '-') + '';
   const actV  = Number(r.is_active) === 1 ? 1 : 0;
   const actHtml = activeBadge(actV);
-  const status =
-      r.status === 0 ? "Ready" :
-      r.status === 1 ? "Running" :
-      r.status === 2 ? "Done" :
-      r.status === 3 ? "Error" : "";
 
+  const statusV = Number(r.status ?? 0);
+  const status =
+      statusV === 0 ? "Ready"   :
+      statusV === 1 ? "Running" :
+      statusV === 2 ? "Done"    :
+      statusV === 3 ? "Stop"    :
+      statusV === 4 ? "Error"   : "";
+
+  // ★ 상태별 글자색(인라인 + !important) — 덮어쓰임 방지
+  const tdAttr =
+      statusV === 1 ? ' style="color:#0a7b00 !important;"' :
+      (statusV === 3 || statusV === 4) ? ' style="color:#b00020 !important;"' :
+      '';
+  // 링크 색도 행 색을 따르게 강제
+  const aAttr = tdAttr ? ' style="color:inherit !important;"' : '';
 
   // 히든 항목들
   const candle = r.simul_candle ?? '';
   const desc   = (r.simul_desc || '').replace(/"/g, '&quot;');
   const main   = r.main_simul_id ?? '';
   const top    = r.main_simul_gid ?? '';
+  const reason = (r.reason || '').replace(/"/g, '&quot;');
 
   return `<tr
+    class="data-row"
     data-id="${sid}"
     data-name="${name.replace(/"/g, '&quot;')}"
     data-type="${typeV}"
@@ -242,22 +274,27 @@ function rowHtml(r){
     data-to="${toS}"
     data-param="${pid === '-' ? '' : pid}"
     data-active="${actV}"
+    data-status="${status}"
+    data-state="${statusV}"
     data-candle="${candle}"
     data-desc="${desc}"
     data-main="${main}"
     data-top="${top}"
+    data-reason="${reason}"
   >
-    <td class="right">${sid}</td>
-    <td class="right">${typeS}</td>
-    <td class="right">${mid}</td>
-    <td class="right">${mgid}</td>
-    <td>${name}</td>
-    <td class="right">${regS}</td>
-    <td class="right">${fromS}</td>
-    <td class="right">${toS}</td>
-    <td class="right">${pid}</td>
-    <td class="right">${actHtml}</td>     <!-- ← 뱃지 표시 -->
-    <td class="right">${status}</td>
+    <td class="right"${tdAttr}>
+      <a href="/cuda/${sid}"${aAttr}>${sid}</a>
+    </td>
+    <td class="right"${tdAttr}>${typeS}</td>
+    <td class="right"${tdAttr}>${mid}</td>
+    <td class="right"${tdAttr}>${mgid}</td>
+    <td${tdAttr}>${name}</td>
+    <td class="right"${tdAttr}>${regS}</td>
+    <td class="right"${tdAttr}>${fromS}</td>
+    <td class="right"${tdAttr}>${toS}</td>
+    <td class="right"${tdAttr}>${pid}</td>
+    <td class="right"${tdAttr}>${actHtml}</td>  <!-- 뱃지 안쪽 스타일이 있으면 그게 우선될 수 있음 -->
+    <td class="right status"${tdAttr}>${status}</td>
   </tr>`;
 }
 
@@ -272,6 +309,7 @@ function rowHtml(r){
     const toDt     = (tds[7]?.innerText || '').trim();
     const pidText  = (tds[8]?.innerText || '').trim();
     const actText  = (tds[9]?.innerText || '').trim();
+    const stText   = (tds[10]?.innerText || '').trim();
     const d = tr.dataset;
 
     f_id.value   = idText ? Number(idText) : '';
@@ -293,10 +331,21 @@ function rowHtml(r){
     //const actViaBadge = badge ? (badge.classList.contains('on') ? '1' : '0') : undefined;
     //f_active.value = d.active ?? actViaBadge ?? '1';
 
+    //console.log("d.status =", d.status, " (row id:", idText, ")");
+
+    f_status.value = '0';
+    if(d.status =='Ready') f_status.value = '0';
+    if(d.status =='Running') f_status.value = '1';
+    if(d.status =='Done') f_status.value = '2';
+    if(d.status =='Stop') f_status.value = '3';
+    if(d.status =='Error') f_status.value = '4';
+    //f_status.value = d.status || '1';
+
     f_candle.value = d.candle ?? '';
     f_desc.value   = d.desc   ?? '';
     f_main.value   = d.main   ?? '';
     f_top.value    = d.top    ?? '';
+    f_reason.value = d.reason ?? '';
   }
 
   async function fetchSimulList(){
@@ -329,6 +378,7 @@ function rowHtml(r){
     f_top.value = '';
     f_param.value = '';
     f_active.value = '1';
+    f_status.value = '0';
     f_reason.value = '';
   }
 
@@ -345,6 +395,7 @@ function rowHtml(r){
       main_simul_gid:  f_top.value ? Number(f_top.value) : null,
       param_set_id:    f_param.value ? Number(f_param.value) : null,
       is_active:       Number(f_active.value),
+      status:          Number(f_status.value),
       reason:          f_reason.value
     };
     const js = await api('/api/simulation', { method: 'POST', body: JSON.stringify(payload) });
@@ -367,6 +418,7 @@ function rowHtml(r){
       main_simul_gid:  f_top.value ? Number(f_top.value) : null,
       param_set_id:    f_param.value ? Number(f_param.value) : null,
       is_active:       Number(f_active.value),
+      status:          Number(f_status.value),
       reason:          f_reason.value
     };
     await api('/api/simulation', { method: 'PUT', body: JSON.stringify(payload) });

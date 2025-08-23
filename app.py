@@ -66,6 +66,7 @@ SIMUL_LIST_EXPECTED = [
     'progress',
     'simul_candle',
     'reg_time',
+    'reason',
     'is_active',
     'status'
 ]
@@ -85,6 +86,8 @@ SIMUL_WRITE_FIELDS = [
     'main_simul_gid',
     'simul_candle',
     'simul_desc',
+    'reason',
+    'status',
     'reason'
 ]
 
@@ -339,7 +342,7 @@ def fetch_simul_detail(simul_id: int, limit=500):
         tp = _alias_if_exists(cols, ['total_profit', 'total_profit_ptr', 'profit_ptr'], 'total_profit')
         if tp:
             select_opt.append(tp)
-        for i in range(1, 21):
+        for i in range(1, 37):
             nk, vk = f'p{i}_name', f'p{i}_val'
             if nk in cols: select_opt.append(nk)
             if vk in cols: select_opt.append(vk)
@@ -388,7 +391,7 @@ def fetch_simul_detail(simul_id: int, limit=500):
 
         # 이름이 있고 값이 None이 아니면 포함 (0도 포함)
         params = []
-        for i in range(1, 21):
+        for i in range(1, 37):
             nk, vk = f'p{i}_name', f'p{i}_val'
             name = r.get(nk, None)
             val  = r.get(vk, None)
@@ -465,7 +468,7 @@ def fetch_simul_detail_paged(simul_id: int, *, page:int=1, page_size:int=200,
             f"{profit_expr} AS total_profit"
         ]
         # add p{i}_name/val if present
-        for i in range(1, 21):
+        for i in range(1, 37):
             nk, vk = f"p{i}_name", f"p{i}_val"
             if nk in cols: sel_min.append(nk)
             if vk in cols: sel_min.append(vk)
@@ -532,7 +535,7 @@ def fetch_simul_detail_paged(simul_id: int, *, page:int=1, page_size:int=200,
                 r[k] = float(v)
         # param_summary
         params_list = []
-        for i in range(1, 21):
+        for i in range(1, 37):
             nk, vk = f"p{i}_name", f"p{i}_val"
             name = r.get(nk, None)
             val  = r.get(vk, None)
@@ -963,7 +966,7 @@ def _apply_avg_slot_conversion_py(param_map: dict) -> dict:
 def _row_to_param_map_py(row: dict) -> dict:
     m = {}
     # Collect p1_name/val .. p20_name/val
-    for i in range(1, 21):
+    for i in range(1, 37):
         nk = f'p{i}_name'
         vk = f'p{i}_val'
         name = row.get(nk, None)
@@ -1014,7 +1017,7 @@ def _fetch_result_row(simul_id: int, gid: int):
     with get_pg_conn() as conn:
         gid_col, cols = _resolve_gid_col(conn)
         sel = [f'{gid_col} AS gid']
-        for i in range(1, 21):
+        for i in range(1, 37):
             nk, vk = f'p{i}_name', f'p{i}_val'
             if nk in cols: sel.append(nk)
             if vk in cols: sel.append(vk)

@@ -272,7 +272,7 @@ function fmtNum(n){
 function buildParamMap(item){
   const map = {};
   let foundAny = false;
-  for (let i=1;i<=20;i++){
+  for (let i=1;i<=36;i++){
     const nk='p'+i+'_name', vk='p'+i+'_val';
     if (nk in item || vk in item){
       const name=item[nk], val=item[vk];

@@ -36,6 +36,9 @@
     .right { text-align:right; }
     .muted { color:#666; font-size:12px; }
     .nav-center { display: flex; justify-content: center; }
+    #simulTable tbody tr.row--running td { color: green; } /* 연한 초록 */
+    #simulTable tbody tr.row--stopped td,
+    #simulTable tbody tr.row--error  td { color: red; }   /* 연한 빨강 */
   </style>
 </head>
 <body>
@@ -131,14 +134,30 @@ function renderTable(items, token){
 
   const filtered = items.filter(r => matchFilter(r, token));
 
+  // 상태 라벨 매핑
+  const statusLabel = { 0: 'Ready', 1: 'Running', 2: 'Done', 3: 'Stop', 4: 'Error' };
+
   for (const r of filtered){
     const tr = document.createElement('tr');
     tr.className = 'data-row';
 
+    // 상태에 따른 행 색상
+    switch (r.status) {
+      case 1: // Running
+        tr.classList.add('row--running');
+        break;
+      case 3: // Stop
+        tr.classList.add('row--stopped');
+        break;
+      case 4: // Error
+        tr.classList.add('row--error');
+        break;
+      // 0(Ready), 2(Done)은 원래색 → 아무 클래스도 추가하지 않음
+    }
+
     // 행 클릭 → 상세 페이지 이동
     tr.addEventListener('click', () => {
       if (r.simul_id != null) {
-        //window.location.href = '/cuda/' + r.simul_id;
         const name = encodeURIComponent(r.simul_name ?? '');
         window.location.href = `/cuda/${r.simul_id}?simul_name=${name}`;
       }
@@ -161,7 +180,7 @@ function renderTable(items, token){
     td_fd.classList.add("right");
     const td_td   = document.createElement('td'); td_td.textContent   = r.simul_to_date ?? '';
     td_td.classList.add("right");
-    const td_case = document.createElement('td'); td_case.textContent = r.case_cnt ?? ''; td_case.className = 'right';
+    const td_case = document.createElement('td'); td_case.textContent = r.case_cnt ?? '';
     td_case.classList.add("right");
     const td_start= document.createElement('td'); td_start.textContent= r.start_time ?? '';
     td_start.classList.add("right");
@@ -170,18 +189,14 @@ function renderTable(items, token){
     const td_prs  = document.createElement('td');
     td_prs.classList.add("right");
     if (r.progress != null) {
-        // 정수 변환 후 % 붙이기
-        td_prs.textContent = `${Math.floor(r.progress)} %`;
+      td_prs.textContent = `${Math.floor(r.progress)} %`;
     } else {
-        td_prs.textContent = '';
+      td_prs.textContent = '';
     }
-    //td_prs.textContent  = r.progress ?? '';
+
     const td_st   = document.createElement('td');
     td_st.classList.add("right");
-    if (r.status == 0) td_st.textContent  = 'Ready';
-    if (r.status == 1) td_st.textContent  = 'Running';
-    if (r.status == 2) td_st.textContent  = 'Done';
-    if (r.status == 3) td_st.textContent  = 'Error';
+    td_st.textContent = statusLabel[r.status] ?? '';
 
     tr.appendChild(td_id);
     tr.appendChild(td_type);
@@ -200,6 +215,7 @@ function renderTable(items, token){
   }
   document.getElementById('status').textContent = 'Rows: ' + filtered.length;
 }
+
 
 async function reload(){
   const limitSel = document.getElementById('limit');
