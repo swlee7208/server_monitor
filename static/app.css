@@ -98,5 +98,185 @@ input[type=number]{ -moz-appearance: textfield; }
 .field.w2{ grid-column: span 2; }
 .field.w3{ grid-column: span 3; }
 
-.container { max-width: 1200px; margin: 0 auto; padding: 16px; }
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 16px;
+}
+
+.grid-container {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 15px;                     /* grid-gap → gap */
+}
+
+.chart-box {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 8px;
+    display: flex;                 /* 제목 + 차트 수직 배치 */
+    flex-direction: column;
+    height: 240px;                 /* 원하는 차트 높이(예: 360~480px) */
+    box-sizing: border-box;
+    overflow: hidden;              /* 내부 넘침 방지 */
+}
+
+.chart-box h4 {
+    font-size: 14px;
+    margin: 4px 0 8px;
+    text-align: center;
+}
+
+.chart-box canvas {
+    flex: 1;                       /* 나머지 공간을 전부 차지 */
+    width: 100% !important;
+    height: 80% !important;       /* 부모 .chart-box 높이에 맞춤 */
+    display: block;                /* inline baseline 간격 제거 */
+}
+
+.toolbar {
+    position: relative;              /* 제목 absolute 기준 */
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 44px;                /* 좁을 때 겹침 방지용 (원하는 높이) */
+}
+
+.toolbar > h4 {
+    position: absolute;
+    margin: 0;
+    text-align: left;
+    pointer-events: none;            /* 클릭 이벤트 방해 안 하도록 */
+}
+
+/* 첫 번째 라벨을 기준으로 오른쪽 끝으로 밀기 */
+.toolbar label:first-of-type {
+    margin-left: auto;
+}
+
+.chart-box button {
+    padding: 6px 10px; border:1px solid #bbb; border-radius:6px; background:#fff; cursor:pointer;
+}
+.chart-box button:hover { background:#f2f2f2; }
+
+.log-select.active { font-weight: 700; text-decoration: underline; }
+
+
+.launch-text {
+  flex:1;
+  min-width:100px;
+  padding:4px 8px;
+  border:1px solid #bbb;
+  border-radius:6px;
+  font-size: 14px;
+}
+
+.launch-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid #c0392b;
+  background: #e74c3c;         /* 기본 빨강 */
+  color: black;
+  cursor: pointer;
+  transition: background .15s, box-shadow .15s, transform .02s;
+  box-shadow: 0 1px 0 rgba(0,0,0,.04);
+}
+
+.opts-quick {
+  align-items:center;
+  margin-top:16px;
+  margin-left:65px;
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+}
+
+
+/* Danger Stop Button */
+.stop-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid #c0392b;
+  background: #e74c3c;         /* 기본 빨강 */
+  color: grey;
+  cursor: pointer;
+  transition: background .15s, box-shadow .15s, transform .02s;
+  box-shadow: 0 1px 0 rgba(0,0,0,.04);
+}
+.stop-btn:hover     { background: #d94232; }
+.stop-btn:active    { transform: translateY(1px); }
+.stop-btn:focus     { outline: 2px solid #ffb4a9; outline-offset: 2px; }
+.stop-btn[disabled] { opacity: .65; cursor: not-allowed; }
+
+/* 사이즈 변형 */
+.stop-btn.sm { padding: 1px 6px; font-size: 8px; border-radius: 6px; }
+.stop-btn.md { padding: 6px 12px; font-size: 12px; }
+.stop-btn.lg { padding: 8px 14px; font-size: 14px; }
+
+/* (선택) 로딩 스피너 */
+.stop-btn.is-loading { position: relative; pointer-events: none; }
+.stop-btn.is-loading::after {
+  content: "";
+  width: 12px; height: 12px;
+  border: 2px solid rgba(255,255,255,.6);
+  border-top-color: #fff;
+  border-radius: 50%;
+  position: absolute; right: 8px; top: 50%;
+  transform: translateY(-50%);
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: translateY(-50%) rotate(360deg); } }
+
+
+.opt-pill {
+  display:inline-block;
+  padding:4px 8px;
+  font-size:12px;
+  border:1px solid #bbb;
+  border-radius:999px;
+  background:#fff;
+  cursor:pointer;
+  user-select:none;
+}
+.opt-pill:hover { background:#f2f2f2; }
+.opt-pill.active { border-color:#6c5ce7; background:#f0ecff; } /* 선택 표시 */
+
+.help-pre {
+  margin:6px 0 0;
+  padding:8px;
+  background:#fff;
+  border:1px solid #e1e4e8;
+  border-radius:6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size:12px;
+  line-height:1.35;
+  white-space:pre-wrap;
+  max-height:180px;
+  overflow:auto;
+}
+
+
+/* 요약 줄이 보이게 */
+.opts-help summary {
+  display: list-item;                 /* 마커 보장 */
+  list-style: disclosure-closed inside;
+  cursor: pointer;
+  font-size: 12px;
+  color: #444;
+  user-select: none;
+  margin-top: 6px;
+}
+.opts-help[open] summary { list-style: disclosure-open inside; }
+
+/* 마커가 숨겨지는 환경 대비(폴백 아이콘) */
+.opts-help summary::before { content: '▸ '; }
+.opts-help[open] summary::before { content: '▾ '; }
+
+.log-select.active { font-weight:700; text-decoration: underline; }
+.row-span-2 { grid-row: span 2; }
+.grid-container { grid-auto-flow: dense; } /* 비어있는 칸 알아서 채움 */
 

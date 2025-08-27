@@ -10,29 +10,26 @@
         nav { background:#343a40; padding:10px; display:flex; gap:20px; }
         nav a { color:#fff; text-decoration:none; font-weight:bold; }
         nav a:hover { text-decoration:underline; }
-        .container { padding:20px; }
         .toolbar { display:flex; align-items:center; gap:12px; margin:6px 0 14px 0; flex-wrap:wrap; }
         .toolbar label { font-size:12px; color:#333; }
         .toolbar select { padding:2px 6px; }
-        .grid-container { display:grid; grid-template-columns:repeat(2,1fr); grid-gap:15px; }
-        .chart-box { background:#f8f9fa; padding:4px; border-radius:8px; text-align:center; }
-        .chart-box h4 { font-size:14px; margin:2px 0; }
-        canvas { max-width:100%; max-height:150px; }
         .nav-center { display: flex; justify-content: center; }
     </style>
 </head>
 <body>
+
 <nav class="nav-center">
-    <a href="/">Monitoring</a>
-    <a href="/cuda">Simul List</a>
-    <a href="/simul">Simul Reg</a>
-    <a href="/paramset">Param Reg</a>
+  <a href="/">Alpha Cuda</a>
+  <a href="/cuda">Simulations</a>
+  <a href="/simul">New Simulation</a>
+  <a href="/paramset">Param Sets</a>
 </nav>
 
 <div class="container">
-    <h4>Server Monitor</h4>
 
     <div class="toolbar">
+        <h4></h4>
+
         <label>
             Refresh Sec:
             <select id="refreshSec">
@@ -47,6 +44,7 @@
             <select id="maxPoints">
                 <option value="50">50</option>
                 <option value="100" selected>100</option>
+                <option value="150">150</option>
                 <option value="200">200</option>
                 <option value="500">500</option>
             </select>
@@ -54,147 +52,878 @@
     </div>
 
     <div class="grid-container">
-        <!-- 1행 -->
+
+        <div class="chart-box" style="height:140px;">
+          <h4>Alpha Cuda Launcher</h4>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <h4>Options : </h4>
+            <input id="alpha_opts" class="launch-text"   type="text">
+            <button id="btn_alpha_launch" class="launch-btn">Launch</button>
+          </div>
+
+            <!-- 빠른 옵션칩(클릭하면 입력란에 토큰 추가/토글) -->
+          <div class="opts-quick">
+            <span class="opt-pill" data-token="-s " data-need="1">-s simul_id</span>
+            <span class="opt-pill" data-token="-f " data-need="1">-f profit</span>
+            <span class="opt-pill" data-token="-r " data-need="1">-r win%</span>
+            <span class="opt-pill" data-token="-e " data-need="1">-e env_no</span>
+            <!-- <span class="opt-pill" data-token="-y ">-y save_yearly</span>  -->
+            <span class="opt-pill" data-token="-n ">-n not_save</span>
+            <span class="opt-pill" data-token="-l ">-l list</span>
+            <span class="opt-pill" data-token="-v ">-v view_env</span>
+            <span class="opt-pill" data-token="-h ">-h help</span>
+          </div>
+
+          <!-- 접이식 도움말 -->
+          <!--
+          <details class="opts-help">
+            <summary>alpha_cuda usage</summary>
+            <pre id="alpha_help_text" class="help-pre">Usage: alpha_cuda [options]
+        -e, --env-no N         Alpha Env no (default 5)
+        -s, --simul-id N       Required. ALPHA_CUDA_SIMUL table simul_id
+        -l, --simul-list       Show list of active simul_id
+        -p, --param-set-id N   SIMUL_PARAM_SET table param_set_id
+        -f, --profit-limit N   Save only results with profit >= N
+        -r, --win-rate N       Save only results with win-rate >= N (default 55)
+        -y, --save-yearly      Save yearly results (default off)
+        -n, --not-save         Do not save any results
+        -d, --debug JOBNO      Print trade log for specified job number
+        -v, --view_env         Show only run envirunments
+        -h, --help             Show this help message</pre>
+          </details>
+           -->
+
+        </div>
+
+        <div class="chart-box row-span-2" style="height: 396px;">
+            <h4>Alpha Cuda Log</h4>
+            <div id="alpha_cuda_log_table"></div>
+        </div>
+
         <div class="chart-box">
-            <h4>CPU Usage (%)</h4>
-            <canvas id="cpuChart"></canvas>
+            <h4>GPU Processes</h4>
+            <div id="gpu_proc_table"></div>
+        </div>
+
+
+        <div class="chart-box">
+            <h4>
+                <span id="title_cpu_usage" style="color:red;">CPU(0.0%)</span> &nbsp;&nbsp;
+                <span id="title_cpu_temp"  style="color:blue;">Temp(0.0°C)</span> &nbsp;&nbsp;
+                <span id="title_cpu_ram"   style="color:purple;">RAM(0.00GB)</span>
+            </h4>
+            <canvas id="cpu_combo_chart"></canvas>
+        </div>
+
+        <div class="chart-box">
+            <h4>
+                <span id="title_gpu_usage" style="color:red;">GPU(0.0%)</span> &nbsp;&nbsp;
+                <span id="title_gpu_temp"  style="color:blue;">Temp(0.0°C)</span> &nbsp;&nbsp;
+                <span id="title_gpu_vram"  style="color:purple;">VRAM(0.00GB)</span>
+            </h4>
+            <canvas id="gpu_combo_chart"></canvas>
+        </div>
+
+        <!-- GPU Clocks -->
+        <div class="chart-box">
+            <h4>
+                <span id="title_gpu_core" style="color:blue;">Core(0000MHz)</span> &nbsp;&nbsp;
+                <span id="title_gpu_mem"  style="color:green;">Mem(0000MHz)</span>
+            </h4>
+            <canvas id="gpu_clk_chart"></canvas>
+        </div>
+        <!-- GPU Power + Fan -->
+        <div class="chart-box">
+            <h4>
+                <span id="title_gpu_power" style="color:red;">Power(0.0W)</span> &nbsp;&nbsp;
+                <span id="title_gpu_fan"   style="color:purple;">Fan(0%)</span>
+            </h4>
+            <canvas id="gpu_pf_chart"></canvas>
+        </div>
+
+        <div class="chart-box">
+            <h4>Disk I/O — <span style="color:black;">MB/s</span> &nbsp; / &nbsp; <span style="color:purple;">IOPS</span></h4>
+            <canvas id="io_chart"></canvas>
         </div>
         <div class="chart-box">
-            <h4>GPU Usage (%)</h4>
-            <canvas id="gpuChart"></canvas>
+            <h4>Network — <span style="color:red;">Up</span> / <span style="color:blue;">Down</span> (MB/s)</h4>
+            <canvas id="net_chart"></canvas>
         </div>
-        <!-- 2행 -->
+
         <div class="chart-box">
-            <h4>System RAM Usage (GB)</h4>
-            <canvas id="ramChart"></canvas>
-        </div>
-        <div class="chart-box">
-            <h4>GPU Memory Usage (GB)</h4>
-            <canvas id="gpuMemChart"></canvas>
-        </div>
-        <!-- 3행 -->
-        <div class="chart-box">
-            <h4>CPU Temp (°C)</h4>
-            <canvas id="cpuTempChart"></canvas>
+            <h4>Top Processes (CPU%)</h4>
+            <div id="top_cpu_table"></div>
         </div>
         <div class="chart-box">
-            <h4>GPU Temp (°C)</h4>
-            <canvas id="gpuTempChart"></canvas>
+            <h4>Top Processes (Memory)</h4>
+            <div id="top_mem_table"></div>
         </div>
+
     </div>
+
 </div>
 
+
+
 <script>
-async function fetchData(){
+function stripAnsi(s) {
+  return s.replace(/\x1B\[[0-9;]*[A-Za-z]/g, ''); // ESC[...m 등 제거
+}
+
+function insertOrToggleToken(inputEl, token, needValue)
+{
+  const cur = inputEl.value || '';
+
+  if (needValue) {
+    // 예: token = "-s "  또는 "-s" (둘 다 지원)
+    const t = token.trim();                     // "-s"
+    const base = cur.trimEnd();                 // 끝쪽 공백만 제거
+    const already = new RegExp(`(^|\\s)${t}(?=\\s|$)`).test(base);
+
+    // 없으면 추가, 있으면 그대로 두되 ' ' 하나 보장
+    let next = already ? base : (base ? base + ' ' + t : t);
+    if (!next.endsWith(' ')) next += ' ';      // 토큰 뒤 공백 보장
+
+    inputEl.value = next;
+    inputEl.focus();
+    inputEl.selectionStart = inputEl.selectionEnd = inputEl.value.length;
+    return;
+  }
+
+  // 값이 필요 없는 토글 옵션(-y, -n, -l, -v, -h 등)
+  const t = token.trim();
+  const has = new RegExp(`(^|\\s)${t}(?=\\s|$)`).test(cur);
+  if (has) {
+    inputEl.value = cur.replace(new RegExp(`(^|\\s)${t}(?=\\s|$)`,'g'),' ')
+                       .replace(/\s+/g,' ').trim();
+  } else {
+    inputEl.value = (cur.trimEnd() ? cur.trimEnd() + ' ' + t : t);
+  }
+  inputEl.focus();
+}
+
+
+
+document.addEventListener('click', (e) => {
+  const pill = e.target.closest('.opt-pill');
+  if (!pill) return;
+  const token = pill.dataset.token || '';
+  const need  = pill.dataset.need === '1';
+  const input = document.getElementById('alpha_opts');
+  if (!input) return;
+
+  insertOrToggleToken(input, token, need);
+  pill.classList.toggle('active');
+});
+
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    const res = await fetch_json('/api/alpha_cuda/help');
+    if (res && res.help) {
+      document.getElementById('alpha_help_text').textContent = res.help;
+    }
+  } catch {}
+});
+
+
+
+async function fetch_status()
+{
     const res = await fetch('/api/status');
     return await res.json();
 }
 
-function createChart(ctx, label, color, yMin, yMax){
-    return new Chart(ctx, {
+
+function create_combo_chart(ctx, right_max_hint_gb)
+{
+    return new Chart(ctx,
+    {
         type: 'line',
-        data: {
+        data:
+        {
             labels: [],
-            datasets: [{
-                label,
-                data: [],
-                borderColor: color,
-                fill: false,
-                borderWidth: 1,            // 선 굵기 (기본 3 → 얇게)
-                pointRadius: 1,            // 포인트 크기
-                pointHoverRadius: 3        // 마우스 오버 시 포인트 크기
-            }]
+            datasets:
+            [
+                // 사용률(%) - 빨강
+                {
+                    label: 'CPU (%)',
+                    data: [],
+                    yAxisID: 'y',
+                    tension: 0.25,
+                    pointRadius: 0,
+                    borderWidth: 2,
+                    borderColor: 'red'
+                },
+                // 온도(°C) - 파랑
+                {
+                    label: 'TMP (°C)',
+                    data: [],
+                    yAxisID: 'y',
+                    tension: 0.25,
+                    pointRadius: 0,
+                    borderWidth: 2,
+                    borderColor: 'blue'
+                },
+                // 메모리(GB) - 보라
+                {
+                    label: 'MEM (GB)',
+                    data: [],
+                    yAxisID: 'y1',
+                    tension: 0.25,
+                    pointRadius: 0,
+                    borderWidth: 2,
+                    borderColor: 'purple'
+                }
+            ]
         },
-        options: {
+        options:
+        {
             responsive: true,
             maintainAspectRatio: false,
             animation: false,
-            plugins: { legend: { display: false } },
-            scales: {
-                x: { display: false },
-                y: { min: yMin, max: yMax }
+            interaction:
+            {
+                mode: 'index',
+                intersect: false
+            },
+            plugins:
+            {
+                legend: { display: false },
+                tooltip:
+                {
+                    callbacks:
+                    {
+                        label: function(item)
+                        {
+                            const lbl = item.dataset.label || '';
+                            const v = item.parsed.y;
+                            if (lbl.includes('GPU')) return `CPU: ${v.toFixed(1)} %`;
+                            if (lbl.includes('TMP'))  return `TMP: ${v.toFixed(1)} °C`;
+                            if (lbl.includes('MEM'))return `MEM: ${v.toFixed(2)} GB`;
+                            return `${lbl}: ${v}`;
+                        }
+                    }
+                }
+            },
+            scales:
+            {
+                x:
+                {
+                    display: false
+                },
+                y:
+                {
+                    position: 'left',
+                    min: 0,
+                    max: 100,          // 사용률/온도 공통(0~100)
+                    grid: { drawOnChartArea: true }
+                },
+                y1:
+                {
+                    position: 'right',
+                    min: 0,
+                    suggestedMax: right_max_hint_gb,  // RAM/VRAM 총용량 힌트
+                    grid: { drawOnChartArea: false }
+                }
             }
         }
     });
 }
 
-
-let refreshMs = 2000;
-let maxKeep   = 100;
-let timerId   = null;
-
-function trimChart(chart){
-    const ds = chart.data.datasets[0];
-    const n = ds.data.length;
-    if (n > maxKeep){
-        const start = n - maxKeep;
-        ds.data = ds.data.slice(start);
-        chart.data.labels = chart.data.labels.slice(start);
-        chart.update('none');
-    }
-}
-
-function pushData(chart, label, value){
+function push_point_with_limit(chart, label, values, max_points)
+{
     chart.data.labels.push(label);
-    chart.data.datasets[0].data.push(value);
-    if (chart.data.labels.length > maxKeep){
+    chart.data.datasets[0].data.push(values[0]); // usage %
+    chart.data.datasets[1].data.push(values[1]); // temp C
+    chart.data.datasets[2].data.push(values[2]); // mem GB
+
+    if (chart.data.labels.length > max_points)
+    {
         chart.data.labels.shift();
-        chart.data.datasets[0].data.shift();
+        chart.data.datasets.forEach(d => d.data.shift());
     }
     chart.update('none');
 }
 
-const cpuChart     = createChart(document.getElementById('cpuChart'), 'CPU %', 'blue',   0, 100);
-const gpuChart     = createChart(document.getElementById('gpuChart'), 'GPU %', 'green',  0, 100);
-const ramChart     = createChart(document.getElementById('ramChart'), 'RAM GB', 'purple', 0, 32);
-const gpuMemChart  = createChart(document.getElementById('gpuMemChart'), 'GPU Mem GB', 'brown', 0, 12);
-const cpuTempChart = createChart(document.getElementById('cpuTempChart'), 'CPU Temp °C', 'red',   20, 100);
-const gpuTempChart = createChart(document.getElementById('gpuTempChart'), 'GPU Temp °C', 'orange',20, 100);
+let refresh_ms = 2000;
+let max_keep   = 100;
+let timer_id   = null;
 
-const allCharts = [cpuChart, gpuChart, ramChart, gpuMemChart, cpuTempChart, gpuTempChart];
+// 초기 총용량 힌트: 백엔드가 주는 값을 사용
+let total_ram_gb  = 32;
+let total_vram_gb = 12;
 
-async function updateCharts(){
-    const data = await fetchData();
-    const time = new Date().toLocaleTimeString();
+const cpu_combo_chart = create_combo_chart(
+    document.getElementById('cpu_combo_chart').getContext('2d'),
+    total_ram_gb
+);
+const gpu_combo_chart = create_combo_chart(
+    document.getElementById('gpu_combo_chart').getContext('2d'),
+    total_vram_gb
+);
 
-    // RAM, GPU 메모리 → GB 단위 변환 (소수점 1자리)
-    const ramGB     = (data.ram_used / 1024).toFixed(1);
-    const gpuMemGB  = data.gpus.length > 0 ? (data.gpus[0].mem_used / 1024).toFixed(1) : 0;
 
-    pushData(cpuChart, time, data.cpu);
-    pushData(cpuTempChart, time, data.cpu_temp);
+// --- helper (안전하게 텍스트 바꿔주기)
+function setText(id, s) { const el = document.getElementById(id); if (el) el.textContent = s; }
 
-    if (data.gpus.length > 0){
-        pushData(gpuChart, time, data.gpus[0].gpu_util);
-        pushData(gpuTempChart, time, data.gpus[0].gpu_temp);
-        pushData(gpuMemChart, time, parseFloat(gpuMemGB));
+async function update_charts()
+{
+    const st  = await fetch_status();
+    const now = new Date().toLocaleTimeString();
+
+    // 총용량 힌트 갱신(한 번만 세팅해도 되지만, 안전하게 최신 반영)
+    if (st && typeof st.ram_total === 'number')
+    {
+        total_ram_gb = (st.ram_total / 1024).toFixed(1) / 1.0; // MiB→GiB
+        cpu_combo_chart.options.scales.y1.suggestedMax = total_ram_gb;
     }
-    pushData(ramChart, time, parseFloat(ramGB));
+
+    // CPU
+    const cpu_pct     = st.cpu || 0;
+    const cpu_temp_c  = (st.cpu_temp != null) ? st.cpu_temp : 0;
+    const ram_used_gb = ((st.ram_used || 0) / 1024).toFixed(2) / 1.0; // MiB→GiB
+    push_point_with_limit(cpu_combo_chart, now, [cpu_pct, cpu_temp_c, ram_used_gb], max_keep);
+
+    setText('title_cpu_usage', `CPU : ${(cpu_pct||0).toFixed(1)} % `);
+    setText('title_cpu_temp',  `TMP : ${(cpu_temp_c ?? 0).toFixed(1)} °C `);
+    setText('title_cpu_ram',   `RAM : ${(ram_used_gb||0).toFixed(2)} GB `);
+
+    // GPU(0번 기준)
+    if (st.gpus && st.gpus.length > 0)
+    {
+        const g0 = st.gpus[0];
+        const gpu_pct     = g0.gpu_util || 0;
+        const gpu_temp_c  = g0.gpu_temp || 0;
+        const vram_used_gb = ((g0.mem_used || 0) / 1024).toFixed(2) / 1.0;
+        const vram_total_gb = ((g0.mem_total || 0) / 1024).toFixed(1) / 1.0;
+
+        // 우측축 힌트 갱신
+        if (vram_total_gb > 0)
+        {
+            total_vram_gb = vram_total_gb;
+            gpu_combo_chart.options.scales.y1.suggestedMax = total_vram_gb;
+        }
+
+        push_point_with_limit(gpu_combo_chart, now, [gpu_pct, gpu_temp_c, vram_used_gb], max_keep);
+
+        setText('title_gpu_usage', `GPU : ${(gpu_pct||0).toFixed(1)} % `);
+        setText('title_gpu_temp',  `TMP : ${(gpu_temp_c||0).toFixed(1)} °C `);
+        setText('title_gpu_vram',  `VRAM : ${(vram_used_gb||0).toFixed(2)} GB `);
+    }
+    else
+    {
+        // GPU 없음: 0으로 채우지 않고 스킵
+    }
 }
 
-function restartTimer(){
-    if (timerId) clearInterval(timerId);
-    timerId = setInterval(updateCharts, refreshMs);
+
+// === Chart factory (dual axis) ===
+function create_dual_axis_chart(ctx, y1_hint)
+{
+    return new Chart(ctx,
+    {
+        type: 'line',
+        data: { labels: [], datasets: [] },
+        options:
+        {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            interaction: { mode:'index', intersect:false },
+            plugins: { legend: { display: false } },
+            scales:
+            {
+                x: { display: false },
+                y:  { position:'left',  grid:{ drawOnChartArea:true } },
+                y1: { position:'right', grid:{ drawOnChartArea:false }, suggestedMax: y1_hint || 100 }
+            }
+        }
+    });
 }
 
-const refreshSel = document.getElementById('refreshSec');
-const maxSel     = document.getElementById('maxPoints');
+function add_dataset(chart, label, yAxisID, color)
+{
+    chart.data.datasets.push({
+        label: label,
+        data: [],
+        yAxisID: yAxisID,
+        tension: 0.25,
+        pointRadius: 0,
+        borderWidth: 2,
+        borderColor: color
+    });
+}
 
-refreshSel.addEventListener('change', () => {
-    refreshMs = parseInt(refreshSel.value, 10) * 1000;
-    restartTimer();
-    updateCharts();
+function push_multi(chart, label, values)
+{
+    chart.data.labels.push(label);
+    chart.data.datasets.forEach((ds, i) => ds.data.push(values[i]));
+    const max_points = 100;
+    if (chart.data.labels.length > max_points)
+    {
+        chart.data.labels.shift();
+        chart.data.datasets.forEach(d => d.data.shift());
+    }
+    chart.update('none');
+}
+
+// === New charts ===
+const io_chart = create_dual_axis_chart(document.getElementById('io_chart').getContext('2d'), 2000);
+add_dataset(io_chart, 'Read MB/s',  'y',  'black');
+add_dataset(io_chart, 'Write MB/s', 'y',  'green');
+add_dataset(io_chart, 'Read IOPS',  'y1', 'purple');
+add_dataset(io_chart, 'Write IOPS', 'y1', 'orange');
+
+const net_chart = create_dual_axis_chart(document.getElementById('net_chart').getContext('2d'));
+add_dataset(net_chart, 'Upload MB/s',   'y', 'red');
+add_dataset(net_chart, 'Download MB/s', 'y', 'blue');
+
+// --- Network chart: single Y axis (remove right axis) ---
+net_chart.data.datasets.forEach(function(ds)
+{
+    ds.yAxisID = 'y';    // 업/다운 둘 다 왼쪽 축 사용
 });
 
-maxSel.addEventListener('change', () => {
-    maxKeep = parseInt(maxSel.value, 10);
-    allCharts.forEach(trimChart);
-    updateCharts();
+net_chart.options.scales.y.min = 0;    // 필요하면 최대도 고정 가능 (예: 125 for 1Gbps)
+delete net_chart.options.scales.y1;    // 오른쪽 축 제거
+net_chart.update('none');
+
+
+
+// GPU Power + Fan (y: W, y1: %)
+const gpu_pf_chart = create_dual_axis_chart(
+    document.getElementById('gpu_pf_chart').getContext('2d'),
+    100  // y1 fan% 힌트
+);
+add_dataset(gpu_pf_chart, 'Power (W)', 'y',  'red');
+add_dataset(gpu_pf_chart, 'Fan (%)',   'y1', 'purple');
+
+gpu_pf_chart.options.scales.y.min   = 0;
+gpu_pf_chart.options.scales.y.max   = 180;
+gpu_pf_chart.options.scales.y1.min   = 0;
+gpu_pf_chart.options.scales.y1.max   = 100;
+
+// GPU Clocks (Core/Mem, MHz) — 두 축 사용
+const gpu_clk_chart = create_dual_axis_chart(
+    document.getElementById('gpu_clk_chart').getContext('2d'),
+    3000 // y1 힌트(메모리 클럭 대략값, 필요시 조정)
+);
+add_dataset(gpu_clk_chart, 'Core (MHz)', 'y',  'blue');
+add_dataset(gpu_clk_chart, 'Mem (MHz)',  'y1', 'green');
+
+// === 여기부터 추가: 단일 Y축(1600~8000)로 통일 ===
+gpu_clk_chart.data.datasets.forEach(function(ds)
+{
+    ds.yAxisID = 'y';     // 두 데이터셋 모두 왼쪽 축 사용
 });
 
-updateCharts();
-restartTimer();
+gpu_clk_chart.options.scales.y.min   = 0;
+gpu_clk_chart.options.scales.y.max   = 8000;
+gpu_clk_chart.options.scales.y.ticks = { stepSize: 500 };  // 보기 좋게 (선택)
+delete gpu_clk_chart.options.scales.y1;                    // 오른쪽 축 제거
+
+gpu_clk_chart.update('none');
+
+
+
+// === Small table renderer ===
+
+
+
+
+function render_table(el, rows, cols)
+{
+    if (!rows || rows.length === 0) {
+        el.innerHTML = '<div style="padding:6px;font-size:12px;color:#666"></div>';
+        return;
+    }
+    const th = '<tr>' + cols.map(c=>`<th style="text-align:left;padding:4px 8px;">${c[1]}</th>`).join('') + '</tr>';
+    const tr = rows.map(r => '<tr>' + cols.map(c => `<td style="padding:2px 8px;">${r[c[0]] ?? ''}</td>`).join('') + '</tr>').join('');
+    el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px;">${th}${tr}</table>`;
+}
+
+
+async function refresh_alpha_status() {
+  const rows = await fetch_json('/api/alpha_cuda/sessions'); // ← 여기!
+  const pill = document.getElementById('alpha_cuda_status_pill');
+  const meta = document.getElementById('alpha_cuda_meta');
+
+  const running = Array.isArray(rows) && rows.length > 0;
+
+  if (pill) {
+    pill.textContent = running ? `running (${rows.length})` : 'stopped';
+    pill.style.background = running ? '#2ecc71' : '#e74c3c';
+  }
+
+  if (meta) {
+    if (running) {
+      // 최근 세션 하나만 요약 표시 (원하면 전체 리스트 렌더링 함수로 대체 가능)
+      const last = rows[rows.length - 1];
+      meta.textContent = `last: ${last.session}${last.pid ? ` (pid ${last.pid})` : ''} — log: ${last.log}`;
+    } else {
+      meta.textContent = 'No running sessions';
+    }
+  }
+}
+
+async function refresh_alpha_sessions() {
+  const box = document.getElementById('alpha_sessions_info');
+  if (!box) return;
+  const rows = await fetch_json('/api/alpha_cuda/sessions');
+  box.innerHTML = rows.length
+    ? `<ul style="margin:6px 0;padding-left:18px;">${
+        rows.map(r => `
+          <li>
+            <a href="#" class="log-select" data-session="${r.session}">
+              ${r.session}${r.pid ? ` (pid ${r.pid})` : ''}
+            </a>
+            — log: ${r.log}
+          </li>
+        `).join('')
+      }</ul>`
+    : '<div>No running sessions</div>';
+}
+
+document.addEventListener('click', async (e) => {
+  const a = e.target.closest('.log-select');
+  if (!a) return;
+  e.preventDefault();
+  const session = a.dataset.session;
+  try {
+    await post_json('/api/alpha_cuda/log/select', { session });   // latest.log 재지정
+    // 바로 최신 로그 다시 읽어와서 반영
+    const log = await fetch_json('/api/alpha_cuda/log?lines=12');
+    const log_rows = (log.lines || []).map(t => ({ text: (typeof stripAnsi==='function'? stripAnsi(t): t) }));
+    render_table(document.getElementById('alpha_cuda_log_table'), log_rows, [['text','']]);
+  } catch (err) {
+    alert(err.message || err);
+  }
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  refresh_alpha_sessions();   // 이미 만든 함수라면 이 한 줄로 끝
+});
+
+function render_sessions_list(rows)
+{
+    const box = document.getElementById('alpha_sessions_info');
+    if (!box) return;
+
+    const selected = localStorage.getItem('alpha_log_session') || '';
+    box.innerHTML = rows && rows.length
+      ? `<ul style="margin:6px 0;padding-left:18px;">${
+          rows.map(r => `
+            <li>
+              <a href="#" class="log-select${selected===r.session ? ' active' : ''}"
+                 data-session="${r.session}">
+                ${r.session}${r.pid ? ` (pid ${r.pid})` : ''}
+              </a>
+                  <!-- — log: ${r.log} -->
+            </li>`).join('')
+        }</ul>`
+      : '<div>No running sessions</div>';
+}
+
+
+
+
+document.addEventListener('DOMContentLoaded', () => {
+  const launchBtn = document.getElementById('btn_alpha_launch');
+  const stopBtn   = document.getElementById('btn_alpha_stop');
+
+  if (launchBtn) {
+    launchBtn.addEventListener('click', async () => {
+      const opts = document.getElementById('alpha_opts')?.value || '';
+      try {
+        const res = await post_json('/api/alpha_cuda/launch', { opts });
+        await refresh_alpha_sessions?.();
+        const log = await fetch_json('/api/alpha_cuda/log?lines=18');
+        const rows = (log.lines || []).map(t => ({ text: t }));
+        render_table(document.getElementById('alpha_cuda_log_table'), rows, [['text','']]);
+      } catch (e) { alert(e.message); }
+    });
+  } else {
+    console.warn('btn_alpha_launch not found');
+  }
+
+  if (stopBtn) {
+    stopBtn.addEventListener('click', async () => {
+      /* ...stop 코드... */
+    });
+  }
+});
+
+
+
+// === Pollers ===
+async function fetch_json(url) {
+  const r = await fetch(url);
+  const txt = await r.text();
+  if (!r.ok) throw new Error(`${url} ${r.status}: ${txt.slice(0,200)}`);
+  return txt ? JSON.parse(txt) : null;
+}
+
+
+async function post_json(url, body)
+{
+    const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {})
+    });
+    const text = await r.text();
+    let js = {};
+    try { js = JSON.parse(text); } catch {}
+    if (!r.ok) throw new Error(js.msg || `${url} ${r.status}: ${text.slice(0,200)}`);
+    return js;
+}
+
+
+async function poll_extra()
+{
+    const ts = new Date().toLocaleTimeString();
+
+    // --- Disk I/O ---
+    try {
+        const io = await fetch_json('/api/io');
+        push_multi(io_chart, ts, [io.disk.read_MBps, io.disk.write_MBps, io.disk.read_iops, io.disk.write_iops]);
+    } catch (e) {
+        console.debug('io error:', e);
+    }
+
+    // --- Network ---
+    try {
+        const net = await fetch_json('/api/net');
+        push_multi(net_chart, ts, [net.up_MBps, net.down_MBps]);
+    } catch (e) {
+        console.debug('net error:', e);
+    }
+
+    // --- GPU Extra (Power/Fan/Clocks) ---
+    try {
+        const gx = await fetch_json('/api/gpu_extra');
+
+        if (gx && gx.length > 0)
+        {
+            const g0 = gx[0];
+
+            // 제목 갱신 (GPU Power / Fan / Clocks)
+            setText('title_gpu_power', `GPU PWR : ${(g0.power_w ?? 0).toFixed(1)} W `);
+            setText('title_gpu_fan',   `FAN : ${Math.round(g0.fan_pct ?? 0)} % `);
+            setText('title_gpu_core',  `GPU CORE : ${Math.round(g0.clock_gr ?? 0)} MHz `);
+            setText('title_gpu_mem',   `MEM : ${Math.round(g0.clock_mem ?? 0)} MHz `);
+
+            push_multi(gpu_pf_chart,  ts, [g0.power_w, g0.fan_pct]);       // Power + Fan
+            push_multi(gpu_clk_chart, ts, [g0.clock_gr, g0.clock_mem]);     // Clocks
+        }
+    } catch (e) {
+        console.debug('gpu_extra error:', e);
+    }
+
+    // --- Top CPU/Memory processes ---
+    try {
+        const procs = await fetch_json('/api/processes');
+        render_table(document.getElementById('top_cpu_table'), procs.top_cpu,
+                     [['pid','PID'],['name','Name'],['cpu','CPU %'],['mem_mb','Mem MB']]);
+        render_table(document.getElementById('top_mem_table'), procs.top_mem,
+                     [['pid','PID'],['name','Name'],['cpu','CPU %'],['mem_mb','Mem MB']]);
+    } catch (e) {
+        console.debug('processes error:', e);
+    }
+
+
+    // --- GPU processes + tmux sessions 매핑 (세션/Stop/VRAM GB) ---
+    try {
+      const [sessions, gprocs] = await Promise.all([
+        fetch_json('/api/alpha_cuda/sessions').catch(() => []),
+        fetch_json('/api/gpu_processes').catch(() => [])
+      ]);
+
+      // pid -> session, session -> log
+      const sessionByPid = {};
+      const logBySession = {};
+      (sessions || []).forEach(s => {
+        if (s.pid) sessionByPid[s.pid] = s.session;
+        if (s.session) logBySession[s.session] = s.log;
+      });
+
+      const savedSess = localStorage.getItem('alpha_log_session') || '';
+      const sessIds = [];
+
+      const rows = (gprocs || [])
+        .sort((a,b) => (b.vram_mb || 0) - (a.vram_mb || 0))
+        .map(p => {
+          const sess = sessionByPid[p.pid] || '';
+          const vramGB = (p.vram_mb ? (p.vram_mb/1024).toFixed(2) : '0.00') + ' GB';
+          const link = sess
+            ? `<a href="#" class="log-select${savedSess===sess?' active':''}"
+                  data-session="${sess}"
+                  title="log: ${logBySession[sess] || ''}">${sess}</a>`
+            : '';
+          const btn = sess
+            ? `<button class="stop-btn sm" data-session="${sess}" title="Stop ${sess}">⏹ Stop</button>`
+            : '';
+
+
+          // ac-...-s7  =>  simul_id = 7
+          let sid = null;
+          const m = /-s(\d+)$/.exec(sess);
+          if (m) { sid = m[1]; sessIds.push(sid); }
+          const progressCell = sid ? `<span id="ppct-${sid}">—</span>` : '—';
+
+          return { pid: p.pid, session: link, name: p.name, vram: vramGB, progress: progressCell, action: btn };
+
+        });
+
+        render_table(
+          document.getElementById('gpu_proc_table'),
+          rows,
+          [['pid','PID'], ['session','Session'], ['name','Name'], ['vram','VRAM'], ['progress','Progress'], ['action','']]
+        );
+
+        if (sessIds.length) {
+          const uniq = [...new Set(sessIds)];
+          try {
+            const map = await fetch_json('/api/simul/progress?ids=' + uniq.join(','));
+            uniq.forEach(sid => {
+              const el = document.getElementById('ppct-' + sid);
+              if (!el) return;
+              const v = map?.[String(sid)];
+              if (typeof v === 'number') el.textContent = v.toFixed(1) + '%';
+            });
+          } catch (e) {
+            console.debug('progress fetch error', e);
+          }
+        }
+
+
+
+    } catch (e) {
+      console.debug('gpu_processes/sessions error:', e);
+    }
+
+
+
+    // --- Alpha CUDA: 상태 + 로그 ---
+    try {
+        await refresh_alpha_status?.();
+    } catch (e) {
+        console.debug('status error:', e);
+    }
+
+    try {
+        const log = await fetch_json('/api/alpha_cuda/log?lines=18');
+        const log_rows = (log.lines || []).map(t => ({ text: (typeof stripAnsi === 'function' ? stripAnsi(t) : t) }));
+        render_table(document.getElementById('alpha_cuda_log_table'), log_rows, [['text','']]);
+    } catch (e) {
+        console.debug('log error:', e);
+    }
+
+    const [sessions, gprocs] = await Promise.all([
+      fetch_json('/api/alpha_cuda/sessions').catch(() => []),
+      fetch_json('/api/gpu_processes').catch(() => [])
+    ]);
+
+    render_sessions_list(sessions);  // ← 이 한 줄 추가!
+
+}
+
+
+document.addEventListener('click', async (e) => {
+  const a = e.target.closest('.log-select');
+  if (!a) return;
+  e.preventDefault();
+
+  const session = a.dataset.session;
+  try {
+    await post_json('/api/alpha_cuda/log/select', { session });  // latest.log 재지정
+    localStorage.setItem('alpha_log_session', session);
+
+    // 로그 패널 즉시 갱신
+    const log = await fetch_json('/api/alpha_cuda/log?lines=18');
+    const rows = (log.lines || []).map(t => ({ text: (typeof stripAnsi==='function' ? stripAnsi(t) : t) }));
+    render_table(document.getElementById('alpha_cuda_log_table'), rows, [['text','Text']]);
+
+    // 활성 표시 업데이트
+    document.querySelectorAll('.log-select.active').forEach(el => el.classList.remove('active'));
+    a.classList.add('active');
+  } catch (err) {
+    alert(err.message || err);
+  }
+});
+
+
+
+document.addEventListener('DOMContentLoaded', async () => {
+  refresh_alpha_sessions?.();   // 목록 먼저
+  const saved = localStorage.getItem('alpha_log_session');
+  if (saved) {
+    try {
+      const log = await fetch_json(`/api/alpha_cuda/log?session=${saved}&lines=18`);
+      const rows = (log.lines || []).map(t => ({ text: (typeof stripAnsi==='function'? stripAnsi(t): t) }));
+      render_table(document.getElementById('alpha_cuda_log_table'), rows, [['text','Text']]);
+    } catch {}
+  }
+});
+
+
+
+setInterval(poll_extra, 2000);
+poll_extra();
+
+// 행의 Stop 버튼 처리 (세션별 안전 종료)
+document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.stop-btn');
+    if (!btn) return;
+    const session = btn.dataset.session;
+    if (!session) return;
+
+    if (!confirm(`Stop session ${session}?`)) return;
+    try {
+        await post_json('/api/alpha_cuda/stop', { session });
+        await refresh_alpha_sessions?.();
+        await poll_extra();   // 즉시 갱신
+    } catch (err) {
+        alert(err.message || err);
+    }
+});
+
+
+
+function restart_timer()
+{
+    if (timer_id) clearInterval(timer_id);
+    timer_id = setInterval(update_charts, refresh_ms);
+}
+
+// UI
+const refresh_sel = document.getElementById('refreshSec');
+const max_sel     = document.getElementById('maxPoints');
+
+refresh_sel.addEventListener('change', function()
+{
+    refresh_ms = parseInt(refresh_sel.value, 10) * 1000;
+    restart_timer();
+    update_charts();
+});
+
+max_sel.addEventListener('change', function()
+{
+    max_keep = parseInt(max_sel.value, 10);
+    update_charts();
+});
+
+// 첫 로드
+update_charts();
+restart_timer();
+
+
 </script>
+
+
+
+
+
 </body>
 </html>
 

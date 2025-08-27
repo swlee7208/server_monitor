@@ -44,16 +44,41 @@
     .sortable.sort-asc::after { content:' ▲'; opacity:.8; }
     .sortable.sort-desc::after { content:' ▼'; opacity:.8; }
     .nav-center { display: flex; justify-content: center; }
+
+    /* 팝업 폭/높이 살짝 여유 */
+    #sqlDialog {
+        width: min(500px, 60vw);
+    }
+
+    /* SQL 텍스트 박스: 기본 높이만 늘리고, 세로 리사이즈 허용 */
+    #sqlText {
+        height: 380px;          /* 기존보다 조금 더 길게 */
+        min-height: 380px;      /* 너무 작아지지 않게 */
+        max-height: 50vh;       /* 화면 70%까지만 */
+        resize: vertical;       /* 드래그로 높이 조절 가능 */
+        overflow: auto;         /* 스크롤 */
+    }
+
+    /* params 칸: 공백/개행 유지 + 모노스페이스 + 가로 스크롤 */
+    .params-pre
+    {
+        white-space: pre;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+        font-size: 12px;
+        line-height: 1.28;
+        overflow-x: auto;
+    }
+
   </style>
 </head>
 <body>
-<nav class="nav-center">
-    <a href="/">Monitoring</a>
-    <a href="/cuda">Simul List</a>
-    <a href="/simul">Simul Reg</a>
-    <a href="/paramset">Param Reg</a>
-</nav>
 
+<nav class="nav-center">
+  <a href="/">Alpha Cuda</a>
+  <a href="/cuda">Simulations</a>
+  <a href="/simul">New Simulation</a>
+  <a href="/paramset">Param Sets</a>
+</nav>
 
 <div class="container">
   <h4 style="margin: 8px 0 10px 2px;">
@@ -148,7 +173,7 @@
       <thead>
         <tr>
           <th>#</th>
-          <th class="nowrap">case_id</th>
+          <th class="nowrap">gid</th>
           <th class="right nowrap sortable" data-sortkey="win_rate">win_rate (%)</th>
           <th class="right nowrap">wins</th>
           <th class="right nowrap">trades</th>
@@ -407,6 +432,482 @@ function setupSortHeaders(){
   });
 }
 
+////////////////////////
+// --- helpers ---------------------------------------------------------------
+
+
+
+function _pad_right(s, n)
+{
+    return s + ' '.repeat(Math.max(0, n - s.length));
+}
+
+function adjust_sql_textarea_height()
+{
+    const ta = document.getElementById('sqlText');
+    if (!ta) return;
+
+    // 한 번 리셋 후 내용 높이만큼 확장 (최대 80vh, 최소 420px)
+    ta.style.height = '0px';
+    const h = Math.min(window.innerHeight * 0.8, ta.scrollHeight + 24);
+    ta.style.height = Math.max(420, Math.floor(h)) + 'px';
+}
+
+function _kv_from_string(s)
+{
+    const t = String(s ?? '').trim().replace(/;$/, '');
+    if (!t) return null;
+
+    // "a=b" 우선, 그다음 "a:b" 도 허용
+    let idx = t.indexOf('=');
+    if (idx < 0) idx = t.indexOf(':');
+    if (idx < 0) return { k: t, v: '' };
+
+    const k = t.slice(0, idx).trim();
+    const v = t.slice(idx + 1).trim();
+    return { k, v };
+}
+
+function _drop_prefix_if_needed(k, drop_prefix)
+{
+    if (drop_prefix && k.startsWith(drop_prefix)) return k.slice(drop_prefix.length);
+    return k;
+}
+
+
+/* any → ['key = val', ...]
+ * - string: "a=1; b=2" or JSON("{...}"/"[...]") 모두 허용
+ * - array : ["a=1","b=2"] 또는 [{name:'a',value:1}, {key:'b',val:2}] 등
+ * - object: {a:1,b:2}
+ */
+function _normalize_to_pairs_any(raw, drop_prefix)
+{
+    const out = [];
+
+    // 1) 문자열인 경우
+    if (typeof raw === 'string')
+    {
+        const s = raw.trim();
+        if (!s) return out;
+
+        // JSON 문자열이면 파싱 시도
+        if ((s.startsWith('{') && s.endsWith('}')) || (s.startsWith('[') && s.endsWith(']')))
+        {
+            try { return _normalize_to_pairs_any(JSON.parse(s), drop_prefix); }
+            catch (_e) { /* 무시하고 아래 일반 파서로 */ }
+        }
+
+        // "a=1; b=2" → 분리
+        s.split(';').forEach(seg =>
+        {
+            const kv = _kv_from_string(seg);
+            if (kv && kv.k)
+            {
+                out.push(_drop_prefix_if_needed(kv.k, drop_prefix) + ' = ' + kv.v);
+            }
+        });
+        return out;
+    }
+
+    // 2) 배열인 경우
+    if (Array.isArray(raw))
+    {
+        for (const it of raw)
+        {
+            if (typeof it === 'string')
+            {
+                const kv = _kv_from_string(it);
+                if (kv && kv.k)
+                {
+                    out.push(_drop_prefix_if_needed(kv.k, drop_prefix) + ' = ' + kv.v);
+                }
+                continue;
+            }
+            if (it && typeof it === 'object')
+            {
+                // 흔한 키 조합 추정: name/param/key + value/val/v
+                const k = it.param_name ?? it.name ?? it.key ?? it.k;
+                const v = it.param_value ?? it.value ?? it.val ?? it.v;
+
+                if (k != null && v != null)
+                {
+                    out.push(_drop_prefix_if_needed(String(k), drop_prefix) + ' = ' + String(v));
+                }
+                else
+                {
+                    // 일반 객체라면 모든 키를 펼쳐서 추가
+                    for (const kk of Object.keys(it))
+                    {
+                        out.push(_drop_prefix_if_needed(String(kk), drop_prefix) + ' = ' + String(it[kk]));
+                    }
+                }
+                continue;
+            }
+            // 숫자/불리언 등은 문자열로
+            out.push(String(it));
+        }
+        return out;
+    }
+
+    // 3) 일반 객체인 경우
+    if (raw && typeof raw === 'object')
+    {
+        for (const k of Object.keys(raw))
+        {
+            out.push(_drop_prefix_if_needed(String(k), drop_prefix) + ' = ' + String(raw[k]));
+        }
+        return out;
+    }
+
+    // 4) 그 외(숫자/불리언 등)
+    return [String(raw ?? '')];
+}
+
+function _normalize_pair(p)
+{
+    const idx = p.indexOf('=');
+    if (idx > 0)
+    {
+        const k = p.slice(0, idx).trim();
+        const v = p.slice(idx + 1).trim();
+        return { key: k, pair: k + ' = ' + v };
+    }
+    return { key: p.trim(), pair: p.trim() };
+}
+
+function _normalize_pair(s, drop_prefix)
+{
+    if (!s) return '';
+    const t = s.trim().replace(/;$/, '');
+    if (!t) return '';
+    const eq = t.indexOf('=');
+    if (eq < 0) return t;
+
+    let k = t.slice(0, eq).trim();
+    const v = t.slice(eq + 1).trim();
+
+    if (drop_prefix && k.startsWith(drop_prefix)) k = k.slice(drop_prefix.length);
+    return k + ' = ' + v;
+}
+
+/*
+ * params(any) → 3컬럼 정렬 여러 줄
+ * opts: { cols: 3, drop_prefix: 's1m1_', col_width, min_w: 18, max_w: 40, sort_keys: true }
+ */
+function format_params_grid(raw_params, opts)
+{
+    const cols        = (opts && opts.cols) || 3;
+    const drop_prefix = (opts && opts.drop_prefix) || '';
+    const min_w       = (opts && opts.min_w) || 18;
+    const max_w       = (opts && opts.max_w) || 40;
+    const sort_keys   = (opts && opts.sort_keys) !== false;
+
+    let pairs = _normalize_to_pairs_any(raw_params, drop_prefix)
+                .filter(Boolean);
+
+    // 보기 일정하게 정렬 (원치 않으면 sort_keys:false)
+    if (sort_keys)
+    {
+        pairs.sort((a, b) => a.localeCompare(b));
+    }
+
+    if (pairs.length === 0) return '';
+
+    const max_len = pairs.reduce((m, p) => Math.max(m, p.length), 0);
+    const col_w   = Math.max(min_w, Math.min((opts && opts.col_width) || (max_len + 2), max_w));
+
+    const lines = [];
+    for (let i = 0; i < pairs.length; i += cols)
+    {
+        let line = '  ';
+        for (let c = 0; c < cols; c++)
+        {
+            const it = pairs[i + c];
+            if (!it) break;
+
+            const last_in_row = (c === cols - 1) || (i + c === pairs.length - 1);
+            line += last_in_row ? it : _pad_right(it, col_w);
+            if (!last_in_row) line += '  ';
+        }
+        lines.push(line);
+    }
+    return lines.join('\n');
+}
+
+
+
+
+
+function _split_set_pairs(set_part)
+{
+    const out = [];
+    let cur = '', depth = 0, in_q = false, qch = '';
+
+    for (let i = 0; i < set_part.length; i++)
+    {
+        const ch = set_part[i];
+
+        if (!in_q && (ch === '"' || ch === "'"))
+        {
+            in_q = true; qch = ch; cur += ch; continue;
+        }
+        if (in_q && ch === qch)
+        {
+            in_q = false; cur += ch; continue;
+        }
+
+        if (!in_q)
+        {
+            if (ch === '(') depth++;
+            else if (ch === ')' && depth > 0) depth--;
+        }
+
+        if (!in_q && depth === 0 && ch === ',')
+        {
+            if (cur.trim()) out.push(cur.trim());
+            cur = '';
+            continue;
+        }
+        cur += ch;
+    }
+    if (cur.trim()) out.push(cur.trim());
+    return out;
+}
+
+function _categorize_key(key)
+{
+    const k = String(key).toLowerCase();
+    if (k.includes('congest2')) return 'congest2';
+    if (k.includes('congest'))  return 'congest';
+    return 'other';
+}
+
+
+
+
+
+
+
+// --- main: grouped two-column formatter ------------------------------------
+function format_sql_for_popup_grouped(raw_sql, opts)
+{
+    const col_width  = Math.max(36, Math.min((opts && opts.col_width) || 44, 72));
+    const group_order = (opts && opts.group_order) || ['other', 'congest', 'congest2'];
+    const with_labels = !!(opts && opts.with_labels);   // 주석 라벨(옵션)
+
+    if (typeof raw_sql !== 'string') return String(raw_sql ?? '');
+
+    const m = raw_sql.replace(/\s+/g, ' ')
+                     .match(/^UPDATE\s+(.+?)\s+SET\s+(.+?)\s+WHERE\s+(.+?);?$/i);
+    if (!m) return raw_sql;
+
+    const table      = m[1].trim();
+    const set_part   = m[2].trim();
+    const where_part = m[3].trim();
+
+    // items: [{key, pair}]
+    const items = _split_set_pairs(set_part).map(_normalize_pair);
+
+    // 그룹핑
+    const buckets = { other: [], congest: [], congest2: [] };
+    for (const it of items) buckets[_categorize_key(it.key)].push(it);
+
+    // 출력용 총합 배열(그룹 순서 반영)
+    const ordered_groups = group_order.map(g => ({ name: g, items: buckets[g] || [] }));
+    const total_real = ordered_groups.reduce((a, g) => a + g.items.length, 0);
+
+    // 줄 빌드: 각 그룹은 **항상 새 줄에서 시작** (그룹 경계를 명확히)
+    const lines = [];
+    let global_idx = 0; // 실 항목의 전역 인덱스(콤마 판단용)
+
+    for (let gi = 0; gi < ordered_groups.length; gi++)
+    {
+        const g = ordered_groups[gi];
+        if (g.items.length === 0) continue;
+
+        if (with_labels)
+        {
+            // SQL 주석 라벨(복붙 실행 가능)
+            lines.push('  -- [' + g.name + ']');
+        }
+
+        for (let i = 0; i < g.items.length; )
+        {
+            // 왼쪽
+            const left_obj = g.items[i];
+            const is_last_left = (global_idx === total_real - 1);
+            const left_pair = left_obj.pair + (is_last_left ? '' : ',');
+            i += 1; global_idx += 1;
+
+            // 오른쪽 (같은 그룹에서만 매칭해 그룹 경계가 항상 새 줄에 오도록)
+            let right_pair = '';
+            if (i < g.items.length)
+            {
+                const is_last_right = (global_idx === total_real - 1);
+                right_pair = g.items[i].pair + (is_last_right ? '' : ',');
+                i += 1; global_idx += 1;
+            }
+
+            lines.push('  ' + _pad_right(left_pair, col_width) + right_pair);
+        }
+
+        // 그룹 사이 가독성용 공백 줄 (마지막 그룹은 생략)
+        if (with_labels && gi < ordered_groups.length - 1)
+        {
+            lines.push('');
+        }
+    }
+
+    return 'UPDATE ' + table + '\nSET\n' + lines.join('\n') + '\nWHERE ' + where_part + ';';
+}
+
+
+////////////////////////////////////
+
+
+// ---------- safe helpers (no name collision) ----------
+function _fp_pad_right_v2(s, n)
+{
+    return s + ' '.repeat(Math.max(0, n - s.length));
+}
+
+function _fp_split_set_pairs_v2(set_part)
+{
+    const out = [];
+    let cur = '', depth = 0, in_q = false, qch = '';
+
+    for (let i = 0; i < set_part.length; i++)
+    {
+        const ch = set_part[i];
+
+        if (!in_q && (ch === '"' || ch === "'"))
+        {
+            in_q = true; qch = ch; cur += ch; continue;
+        }
+        if (in_q && ch === qch)
+        {
+            in_q = false; cur += ch; continue;
+        }
+
+        if (!in_q)
+        {
+            if (ch === '(') depth++;
+            else if (ch === ')' && depth > 0) depth--;
+        }
+
+        if (!in_q && depth === 0 && ch === ',')
+        {
+            if (cur.trim()) out.push(cur.trim());
+            cur = '';
+            continue;
+        }
+        cur += ch;
+    }
+    if (cur.trim()) out.push(cur.trim());
+    return out;
+}
+
+function _fp_to_kv_obj_v2(p)
+{
+    // 문자열 "k=v" → { key:'k', pair:'k = v' }
+    if (typeof p === 'string')
+    {
+        const idx = p.indexOf('=');
+        if (idx > 0)
+        {
+            const k = p.slice(0, idx).trim();
+            const v = p.slice(idx + 1).trim();
+            return { key: k, pair: k + ' = ' + v };
+        }
+        return { key: p.trim(), pair: p.trim() };
+    }
+    // 이미 {key, pair} 형태라면 그대로 사용
+    if (p && typeof p === 'object' && 'key' in p && 'pair' in p)
+    {
+        return p;
+    }
+    // 그 외는 방어적으로 문자열화
+    const s = String(p ?? '');
+    return { key: s, pair: s };
+}
+
+function _fp_group_of_v2(key)
+{
+    const k = String(key || '').toLowerCase();
+    if (k.includes('congest2')) return 'congest2';
+    if (k.includes('congest'))  return 'congest';
+    return 'other';
+}
+
+// ---------- main: grouped pretty-print (safe v2) ----------
+function format_sql_for_popup_grouped_v2(raw_sql, opts)
+{
+    const col_width   = Math.max(36, Math.min((opts && opts.col_width) || 44, 60));
+    const group_order = (opts && opts.group_order) || ['other', 'congest', 'congest2'];
+    const with_labels = !!(opts && opts.with_labels);
+
+    if (typeof raw_sql !== 'string') return String(raw_sql ?? '');
+
+    // 멀티라인 허용 파서
+    const m = raw_sql.match(/^UPDATE\s+(.+?)\s+SET\s+([\s\S]+?)\s+WHERE\s+(.+?);?$/i);
+    if (!m) return raw_sql;
+
+    const table      = m[1].trim();
+    const set_part   = m[2].trim();
+    const where_part = m[3].trim();
+
+    // 문자열 목록 → 안전한 {key, pair} 객체 목록
+    const items = _fp_split_set_pairs_v2(set_part).map(_fp_to_kv_obj_v2);
+
+    // 그룹핑
+    const buckets = { other: [], congest: [], congest2: [] };
+    for (const it of items) buckets[_fp_group_of_v2(it.key)].push(it);
+
+    const groups = group_order.map(g => ({ name: g, items: buckets[g] || [] }));
+    const total  = groups.reduce((a, g) => a + g.items.length, 0);
+
+    const lines = [];
+    let idx = 0;
+
+    for (let gi = 0; gi < groups.length; gi++)
+    {
+        const g = groups[gi];
+        if (g.items.length === 0) continue;
+
+        if (with_labels) lines.push('  -- [' + g.name + ']');
+
+        for (let i = 0; i < g.items.length; )
+        {
+            // left
+            const left = g.items[i];
+            const is_last_left = (idx === total - 1);
+            const left_pair = left.pair + (is_last_left ? '' : ',');
+            i += 1; idx += 1;
+
+            // right (같은 그룹에서만 페어링)
+            let right_pair = '';
+            if (i < g.items.length)
+            {
+                const is_last_right = (idx === total - 1);
+                right_pair = g.items[i].pair + (is_last_right ? '' : ',');
+                i += 1; idx += 1;
+            }
+
+            lines.push('  ' + _fp_pad_right_v2(left_pair, col_width) + right_pair);
+        }
+
+        if (with_labels && gi < groups.length - 1) lines.push('');
+    }
+
+    return 'UPDATE ' + table + '\nSET\n' + lines.join('\n') + '\nWHERE ' + where_part + ';';
+}
+
+
+
+
+
+
+
 /* 테이블 렌더 */
 function renderTable(items, token){
   const tbody = document.querySelector('#detailTable tbody');
@@ -477,8 +978,17 @@ function renderTable(items, token){
         ta.value = sql;
         __lastCombinedPayload = null;
       }
+
+      ta.value = format_sql_for_popup_grouped_v2(ta.value, {
+          col_width: 36,                 // 팝업 폭에 맞춰 40~48 권장
+          group_order: ['congest', 'congest2', 'other'], // congest 묶음을 앞쪽으로
+          with_labels: true             // true로 하면 그룹 라벨 주석 라인 추가
+      });
+
       if (typeof dlg.showModal === 'function') dlg.showModal();
       else dlg.setAttribute('open','');
+
+      adjust_sql_textarea_height();
     });
 
     const td_rank = document.createElement('td'); td_rank.textContent = rank;
@@ -493,16 +1003,45 @@ function renderTable(items, token){
     const td_tc = document.createElement('td'); td_tc.textContent = r.trades ?? r.trade_cnt ?? ''; td_tc.className = 'right';
 
     const profit = (r.total_profit ?? r.total_profit_ptr ?? r.profit_ptr ?? '');
-    const td_pf = document.createElement('td'); td_pf.textContent = Number(profit || 0).toFixed(2); td_pf.className = 'right';
 
-    const td_par = document.createElement('td'); td_par.textContent = r.param_summary ?? '';
 
-    tr.appendChild(td_rank); tr.appendChild(td_case); tr.appendChild(td_wr);
-    tr.appendChild(td_wc); tr.appendChild(td_tc); tr.appendChild(td_pf); tr.appendChild(td_par);
+    // 기존
+    // const td_pf = document.createElement('td'); td_pf.textContent = Number(profit || 0).toFixed(2); td_pf.className = …
+    // const td_par = document.createElement('td'); td_par.textContent = r.param_summary ?? '';
+
+    // 교체
+    // profit 셀 (기존 유지)
+    const td_pf = document.createElement('td');
+    td_pf.textContent = Number(profit || 0).toFixed(2);
+    td_pf.className = 'right';
+
+    // params 셀 (3컬럼 포맷)
+    const td_par = document.createElement('td');
+    const pre = document.createElement('pre');
+    pre.className = 'params-pre';
+    pre.textContent = format_params_grid(r.param_summary ?? '', {
+        cols: 4,
+        drop_prefix: 's1m1_',   // 접두사 제거 안 하려면 '' 로
+        min_w: 20,
+        max_w: 26
+    });
+    td_par.appendChild(pre);
+
+    // append
+    tr.appendChild(td_rank);
+    tr.appendChild(td_case);
+    tr.appendChild(td_wr);
+    tr.appendChild(td_wc);
+    tr.appendChild(td_tc);
+    tr.appendChild(td_pf);
+    tr.appendChild(td_par);
     tbody.appendChild(tr);
   }
   document.getElementById('status').textContent = 'Rows: ' + filtered.length;
 }
+
+
+
 
 /* 로드 & 페이저 */
 async function reload(){

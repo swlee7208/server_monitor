@@ -4,10 +4,12 @@ import psutil
 import subprocess
 import os
 import re
+import time
+import shlex
+from pathlib import Path
+from collections import deque
 from datetime import datetime
 from decimal import Decimal
-
-
 
 try:
     import psycopg2
@@ -37,6 +39,12 @@ ENV_TABLE = os.getenv('ALPHA_ENV_TABLE', 'alpha_env')
 APPLY_ENABLED = os.getenv('ALPHA_ENABLE_APPLY', '1')
 
 valid_ident = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')  # 컬럼명 검증용
+
+# ===== Alpha CUDA config =====
+ALPHA_CUDA_BIN   = '/home/alpha/bin/alpha_cuda'     # 요구사항 1
+ALPHA_CUDA_CWD   = '/home/alpha'                    # 필요시 원하는 작업 디렉터리
+ALPHA_LOG_DIR    = '/home/alpha/alpha_logs'         # 로그 디렉터리 (요구사항 3)
+ALPHA_TMUX_PREF  = 'ac'                             # tmux 세션 prefix
 
 
 # 상세에서의 별칭 기준(둘 중 하나만 있어도 됨 → alias로 통일)
@@ -190,11 +198,238 @@ def _filter_existing_cols(conn, table_name: str, payload: dict) -> dict:
 
 
 
-
-
 # =============================
 # Monitor helpers
 # =============================
+
+def _tmux_has_session(name: str) -> bool:
+    try:
+        return subprocess.run(['tmux', 'has-session', '-t', name],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+    except Exception:
+        return False
+
+def _tmux_list_sessions(prefix: str):
+    try:
+        out = subprocess.check_output(['tmux', 'list-sessions', '-F', '#{session_name}\t#{session_created}'],
+                                      stderr=subprocess.DEVNULL).decode()
+        rows = []
+        for line in out.splitlines():
+            if not line.strip():
+                continue
+            name, created = line.split('\t', 1)
+            if name.startswith(prefix + '-'):
+                rows.append({'session': name, 'created': int(created)})
+        rows.sort(key=lambda r: r['created'])
+        return rows
+    except Exception:
+        return []
+
+
+def _extract_slug(opts_list):
+    """옵션에서 -s/--simul-id, -e/--env-no 같은 걸 슬러그로 조금 붙여줌(없어도 괜찮음)."""
+    slug = []
+    for i, tok in enumerate(opts_list):
+        if tok in ('-s', '--simul-id') and i + 1 < len(opts_list):
+            slug.append(f"s{opts_list[i+1]}")
+        if tok in ('-e', '--env-no') and i + 1 < len(opts_list):
+            slug.append(f"e{opts_list[i+1]}")
+    return ('-' + '-'.join(slug)) if slug else ''
+
+
+def _new_session_name(opts_list):
+    ts = time.strftime('%y%m%d-%H%M%S')
+    return f"{ALPHA_TMUX_PREF}-{ts}{_extract_slug(opts_list)}"  # 예: ac-250824-101512-s6-e5
+
+def _ensure_log_dir():
+    Path(ALPHA_LOG_DIR).mkdir(parents=True, exist_ok=True)
+
+def _log_path_for_session(session: str) -> str:
+    return str(Path(ALPHA_LOG_DIR) / f"{session}.log")
+
+def _touch_symlink_latest(target_log: str):
+    # latest.log 심볼릭 링크를 최근 실행 로그로 갱신
+    latest = Path(ALPHA_LOG_DIR) / 'latest.log'
+    try:
+        if latest.is_symlink() or latest.exists():
+            latest.unlink()
+    except Exception:
+        pass
+    try:
+        latest.symlink_to(Path(target_log).name)  # 같은 폴더이므로 상대 링크
+    except Exception:
+        # 심볼릭 링크 불가한 FS면 그냥 복사 없이 무시
+        pass
+
+def _tmux_launch_with_opts(opts_str: str):
+    _ensure_log_dir()
+
+    # 옵션 파싱(사용자가 입력한 옵션 그대로, 공백/따옴표 안전하게 처리)
+    try:
+        opts_list = shlex.split(opts_str or '')
+    except Exception as e:
+        return {'ok': False, 'msg': f'option parse error: {e}'}
+
+    session = _new_session_name(opts_list)
+    log_path = _log_path_for_session(session)
+
+    # 이미 동일 이름이 있으면(희박하지만) 뒤에 -1 붙이는 처리
+    if _tmux_has_session(session):
+        k = 1
+        while _tmux_has_session(f"{session}-{k}"):
+            k += 1
+        session = f"{session}-{k}"
+
+    try:
+        # tmux new-session -d -s session -c CWD BIN ARGS...
+        cmd = ['tmux', 'new-session', '-d', '-s', session, '-c', ALPHA_CUDA_CWD, ALPHA_CUDA_BIN] + opts_list
+        subprocess.check_call(cmd)
+
+        # pipe-pane으로 세션 출력 → 로그파일 append
+        subprocess.check_call(['tmux', 'pipe-pane', '-o', '-t', session, f'cat >> {log_path}'])
+
+        _touch_symlink_latest(log_path)
+        return {'ok': True, 'session': session, 'log': log_path}
+    except subprocess.CalledProcessError as e:
+        return {'ok': False, 'msg': f'launch failed: {e}'}
+
+def _tmux_kill(session: str):
+    try:
+        if not _tmux_has_session(session):
+            return {'ok': True, 'msg': f'session "{session}" not running'}
+        subprocess.check_call(['tmux', 'kill-session', '-t', session])
+        return {'ok': True}
+    except subprocess.CalledProcessError as e:
+        return {'ok': False, 'msg': f'kill failed: {e}'}
+
+def _tmux_status_list():
+    rows = _tmux_list_sessions(ALPHA_TMUX_PREF)
+    # pid(있으면) 조회
+    for r in rows:
+        try:
+            out = subprocess.check_output(['tmux', 'list-panes', '-t', r['session'], '-F', '#{pane_pid}']).decode().strip()
+            r['pid'] = int(out) if out and out.isdigit() else None
+        except Exception:
+            r['pid'] = None
+        r['log'] = _log_path_for_session(r['session'])
+    return rows
+
+
+@app.route('/api/alpha_cuda/launch', methods=['POST'])
+def api_alpha_cuda_launch():
+    js = request.get_json(silent=True) or {}
+    opts = js.get('opts', '')              # 예: "-s 6 -f 3400"
+    res = _tmux_launch_with_opts(opts)
+    return (jsonify(res), 200 if res.get('ok') else 500)
+
+@app.route('/api/alpha_cuda/stop', methods=['POST'])
+def api_alpha_cuda_stop():
+    js = request.get_json(silent=True) or {}
+    session = js.get('session')            # 특정 세션만 종료
+    if not session:
+        return jsonify({'ok': False, 'msg': 'session required'}), 400
+    res = _tmux_kill(session)
+    return (jsonify(res), 200 if res.get('ok') else 500)
+
+@app.route('/api/alpha_cuda/sessions')
+def api_alpha_cuda_sessions():
+    return jsonify(_tmux_status_list())
+
+@app.route('/api/alpha_cuda/help')
+def api_alpha_cuda_help():
+    return jsonify(_tmux_status_list())
+
+@app.route('/api/alpha_cuda/log')
+def api_alpha_cuda_log():
+    # ?session=ac-...&lines=100  (없으면 latest.log)
+    lines = request.args.get('lines', default=12, type=int)
+    lines = max(1, min(lines, 1000))
+    session = request.args.get('session')
+    if session:
+        path = _log_path_for_session(session)
+    else:
+        path = str(Path(ALPHA_LOG_DIR) / 'latest.log')
+    try:
+        data = tail_file(path, n=lines)
+        return jsonify({'path': path, 'lines': data})
+    except Exception as e:
+        return jsonify({'path': path, 'lines': [], 'error': str(e)}), 500
+
+
+@app.route('/api/alpha_cuda/log/select', methods=['POST'])
+def api_alpha_cuda_log_select():
+    js = request.get_json(silent=True) or {}
+    session = (js.get('session') or '').strip()
+    if not session:
+        return jsonify({'ok': False, 'msg': 'session required'}), 400
+
+    log_path = _log_path_for_session(session)
+    p = Path(log_path)
+    if not p.exists():
+        return jsonify({'ok': False, 'msg': f'log not found: {log_path}'}), 404
+
+    latest = Path(ALPHA_LOG_DIR) / 'latest.log'
+    try:
+        # 이미 같은 대상이면 작업 스킵
+        if latest.is_symlink():
+            try:
+                if latest.resolve() == p.resolve():
+                    return jsonify({'ok': True, 'session': session, 'log': str(p)})
+            except Exception:
+                pass
+
+        # 임시 링크를 만든 뒤 원자적으로 교체 → 레이스/존재 에러 회피
+        tmp = Path(ALPHA_LOG_DIR) / '.latest.tmp'
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+
+        # 절대 경로로 링크(신뢰성↑)
+        tmp.symlink_to(p)
+        os.replace(tmp, latest)    # atomic replace (기존 latest가 있어도 OK)
+
+        return jsonify({'ok': True, 'session': session, 'log': str(p)})
+    except Exception as e:
+        return jsonify({'ok': False, 'msg': f'symlink failed: {e}'}), 500
+
+
+# === progress by simul_id(s) ===
+@app.get('/api/simul/progress')
+def api_simul_progress():
+    """
+    /api/simul/progress?ids=7,12,15
+    -> {"7": 42.3, "12": 88.1, "15": 100.0}
+    """
+    ids_param = (request.args.get('ids') or '').strip()
+    ids = [int(x) for x in ids_param.split(',') if x.isdigit()]
+    if not ids:
+        return jsonify({})
+
+    try:
+        with get_pg_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # progress가 numeric/float/decimal 어떤 타입이든 double로 캐스팅
+            sql = f"SELECT simul_id, (progress)::double precision AS progress FROM {qualify(SIMUL_TABLE)} WHERE simul_id = ANY(%s)"
+            cur.execute(sql, (ids,))
+            rows = cur.fetchall()
+        return jsonify({str(r['simul_id']): (float(r['progress']) if r['progress'] is not None else None) for r in rows})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+############################################
+
+
+
+def tail_file(path, n=10):
+    try:
+        with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+            dq = deque(f, maxlen=n)
+        return [line.rstrip('\n') for line in dq]
+
+    except Exception:
+        return []
+
 def get_gpu_usage():
     try:
         output = subprocess.check_output(
@@ -221,13 +456,227 @@ def get_gpu_usage():
 def get_cpu_temp():
     try:
         temps = psutil.sensors_temperatures()
-        if 'coretemp' in temps:
-            return temps['coretemp'][0].current
-        elif 'cpu-thermal' in temps:
-            return temps['cpu-thermal'][0].current
+        if not temps:
+            return None
+        # 우선순위 키 후보
+        for key in ("coretemp", "k10temp", "cpu-thermal", "acpitz"):
+            if key in temps and temps[key]:
+                return temps[key][0].current
+        # fallback: 첫번째 센서
+        first_key = next(iter(temps))
+        return temps[first_key][0].current
     except Exception:
         return None
-    return None
+
+
+
+# === ADD: Globals for rate calculations (put near other monitor helpers) ===
+_io_prev = {
+    'time': None,
+    'disk': None,   # psutil._common.sdiskio
+    'net': None     # psutil._common.snetio
+}
+
+def _rate_per_sec(new, old, dt):
+    return (new - old) / dt if (old is not None and dt > 0) else 0.0
+
+def _mb(x):
+    return x / (1024.0 * 1024.0)
+
+def get_disk_net_rates():
+    """Return (disk, net) rates over time using psutil counters.
+    disk: {read_MBps, write_MBps, read_iops, write_iops}
+    net:  {up_MBps, down_MBps}
+    """
+    now = time.time()
+    d = psutil.disk_io_counters()
+    n = psutil.net_io_counters()
+
+    prev_t = _io_prev['time']
+    prev_d = _io_prev['disk']
+    prev_n = _io_prev['net']
+
+    if prev_t is None:
+        _io_prev.update({'time': now, 'disk': d, 'net': n})
+        return (
+            {'read_MBps': 0.0, 'write_MBps': 0.0, 'read_iops': 0.0, 'write_iops': 0.0},
+            {'up_MBps': 0.0, 'down_MBps': 0.0}
+        )
+
+    dt = max(1e-6, now - prev_t)
+
+    disk_rates = {
+        'read_MBps':  _mb(_rate_per_sec(d.read_bytes,  prev_d.read_bytes,  dt)),
+        'write_MBps': _mb(_rate_per_sec(d.write_bytes, prev_d.write_bytes, dt)),
+        'read_iops':  _rate_per_sec(d.read_count,      prev_d.read_count,  dt),
+        'write_iops': _rate_per_sec(d.write_count,     prev_d.write_count, dt),
+    }
+    net_rates = {
+        'up_MBps':   _mb(_rate_per_sec(n.bytes_sent, prev_n.bytes_sent, dt)),
+        'down_MBps': _mb(_rate_per_sec(n.bytes_recv, prev_n.bytes_recv, dt)),
+    }
+
+    _io_prev.update({'time': now, 'disk': d, 'net': n})
+    return (disk_rates, net_rates)
+
+
+def get_gpu_extra():
+    """Query power, clocks, fan via nvidia-smi."""
+    try:
+        out = subprocess.check_output(
+            [
+                'nvidia-smi',
+                '--query-gpu=power.draw,clocks.gr,clocks.mem,fan.speed',
+                '--format=csv,noheader,nounits'
+            ]
+        ).decode('utf-8').strip()
+        res = []
+        for line in out.split('\n'):
+            p, cgr, cmem, fan = [x.strip() for x in line.split(',')]
+            res.append({
+                'power_w': float(p),
+                'clock_gr': int(cgr),
+                'clock_mem': int(cmem),
+                'fan_pct': float(fan)
+            })
+        return res
+    except Exception:
+        return []
+
+
+def get_cpu_fans():
+    fans = []
+
+    # 1) psutil
+    try:
+        data = psutil.sensors_fans()
+        for name, arr in data.items():
+            for f in arr:
+                rpm = getattr(f, 'current', None)
+                if rpm is not None:
+                    fans.append({
+                        'sensor': name,
+                        'label': f.label or '',
+                        'rpm': int(rpm)
+                    })
+    except Exception:
+        pass
+
+    if fans:
+        return fans
+
+    # 2) /sys/class/hwmon (Linux)
+    try:
+        base = '/sys/class/hwmon'
+        if os.path.isdir(base):
+            for root, dirs, files in os.walk(base):
+                # chip name
+                chip = ''
+                try:
+                    with open(os.path.join(root, 'name'), 'r') as nf:
+                        chip = nf.read().strip()
+                except Exception:
+                    chip = os.path.basename(root)
+
+                # fanX_input files
+                for fn in sorted(f for f in files if re.match(r'^fan\d+_input$', f)):
+                    path = os.path.join(root, fn)
+                    try:
+                        with open(path, 'r') as ff:
+                            rpm = int(ff.read().strip() or '0')
+                        label_path = os.path.join(root, fn.replace('_input', '_label'))
+                        label = ''
+                        if os.path.exists(label_path):
+                            with open(label_path, 'r') as lf:
+                                label = lf.read().strip()
+                        fans.append({
+                            'sensor': chip,
+                            'label': label or fn.replace('_input', ''),
+                            'rpm': rpm
+                        })
+                    except Exception:
+                        continue
+    except Exception:
+        pass
+
+    if fans:
+        return fans
+
+    # 3) IPMI (server/BMC)
+    try:
+        out = subprocess.check_output(
+            ['ipmitool', 'sdr', 'type', 'Fan'],
+            timeout=2
+        ).decode('utf-8', errors='ignore')
+        for line in out.splitlines():
+            # e.g. "FAN1 | 1400 RPM | ok"
+            m = re.match(r'\s*([^|]+)\|\s*([0-9]+)\s*RPM', line)
+            if m:
+                label = m.group(1).strip()
+                rpm = int(m.group(2))
+                fans.append({
+                    'sensor': 'ipmi',
+                    'label': label,
+                    'rpm': rpm
+                })
+    except Exception:
+        pass
+
+    return fans
+
+
+
+
+
+def get_top_processes(topn=10):
+    """Return top processes by CPU and Memory."""
+    procs = []
+    for p in psutil.process_iter(attrs=['pid', 'name']):
+        try:
+            cpu = p.cpu_percent(interval=0.0)
+            mem = p.memory_info().rss
+            procs.append({'pid': p.pid, 'name': p.info['name'] or '', 'cpu': cpu, 'mem_mb': _mb(mem)})
+        except Exception:
+            continue
+    # quick warm-up for cpu_percent
+    time.sleep(0.05)
+    for item in procs:
+        try:
+            p = psutil.Process(item['pid'])
+            item['cpu'] = p.cpu_percent(interval=0.0)
+        except Exception:
+            pass
+    by_cpu = sorted(procs, key=lambda x: x['cpu'], reverse=True)[:topn]
+    by_mem = sorted(procs, key=lambda x: x['mem_mb'], reverse=True)[:topn]
+    return {'top_cpu': by_cpu, 'top_mem': by_mem}
+
+
+def get_gpu_processes():
+    """Use nvidia-smi to list GPU processes (PID, name, used_memory MB)."""
+    try:
+        out = subprocess.check_output(
+            [
+                'nvidia-smi',
+                '--query-compute-apps=pid,process_name,used_memory',
+                '--format=csv,noheader,nounits'
+            ]
+        ).decode('utf-8').strip()
+        rows = []
+        if not out:
+            return rows
+        for line in out.split('\n'):
+            parts = [x.strip() for x in line.split(',')]
+            if len(parts) >= 3:
+                pid = int(parts[0])
+                name = parts[1]
+                mem_mb = float(parts[2])  # already MB
+                rows.append({'pid': pid, 'name': name, 'vram_mb': mem_mb})
+        return rows
+    except Exception:
+        return []
+
+
+
 
 # =============================
 # DB helpers
@@ -1148,6 +1597,38 @@ def api_combined_env_update():
         })
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+# === ADD: New API endpoints ===
+@app.route('/api/io')
+def api_io():
+    disk, net = get_disk_net_rates()
+    return jsonify({'disk': disk, 'net': net})
+
+@app.route('/api/net')
+def api_net():
+    _, net = get_disk_net_rates()
+    return jsonify(net)
+
+@app.route('/api/gpu_extra')
+def api_gpu_extra():
+    return jsonify(get_gpu_extra())
+
+@app.route('/api/fans')
+def api_fans():
+    return jsonify(get_cpu_fans())
+
+@app.route('/api/processes')
+def api_processes():
+    return jsonify(get_top_processes())
+
+@app.route('/api/gpu_processes')
+def api_gpu_processes():
+    return jsonify(get_gpu_processes())
+
+
+
+
 # =============================
 # Main
 # =============================

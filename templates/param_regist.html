@@ -41,19 +41,19 @@
     .right { text-align:right; }
     .left { text-align:left; }
 
-    #listBody tr.row--active td { color: green !important; font-weight: 700 !important;}
+    #listBody tr.row--active td { color: blue !important; font-weight: 700 !important;}
+    #listBody tr.row--active-con2 td { color: purple !important; font-weight: 700 !important;}
 
   </style>
 </head>
 <body>
 
 <nav class="nav-center">
-    <a href="/">Monitoring</a>
-    <a href="/cuda">Simul List</a>
-    <a href="/simul">Simul Reg</a>
-    <a href="/paramset">Param Reg</a>
+  <a href="/">Alpha Cuda</a>
+  <a href="/cuda">Simulations</a>
+  <a href="/simul">New Simulation</a>
+  <a href="/paramset">Param Sets</a>
 </nav>
-
 
 <div class="container">
   <h4 style="margin: 8px 0 10px 2px;">Alpha Cuda :: Parameta Set Regist</h4>
@@ -315,7 +315,14 @@ async function loadRows(setId){
         <td class="right"><span class="badge ${isOn?'on':'off'}">${isOn?'ON':'OFF'}</span></td>
       `;
 
-      if (isOn) tr.classList.add('row--active');  // ✅ 여기!
+      if (isOn) {
+        tr.classList.add('row--active');
+        const name = (r.param_name ?? '').toString().toLowerCase();
+        if (name.includes('congest2')) {
+          tr.classList.add('row--active-con2');
+        }
+      }
+
 
       tr.addEventListener('click', ()=> setForm(r));
       tbody.appendChild(tr);
