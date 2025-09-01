@@ -188,7 +188,9 @@ function renderTable(items, token){
     const td_prs  = document.createElement('td');
     td_prs.classList.add("right");
     if (r.progress != null) {
-      td_prs.textContent = `${Math.floor(r.progress)} %`;
+      const n = Number(String(r.progress).replace(/[^\d.-]/g, '')); // "%", 공백 제거 후 숫자화
+      td_prs.textContent = Number.isFinite(n) ? `${n.toFixed(1)} %` : '';
+      //td_prs.textContent = `${r.progress.toFixed(1)} %`;
     } else {
       td_prs.textContent = '';
     }

@@ -733,7 +733,7 @@ async function poll_extra()
     }
 
 
-    // --- GPU processes + tmux sessions (정렬 + 진행률 표시) ---
+    // --- GPU processes + tmux sessions 매핑 (세션/Stop/VRAM GB) ---
     try {
       const [sessions, gprocs] = await Promise.all([
         fetch_json('/api/alpha_cuda/sessions').catch(() => []),
@@ -744,128 +744,68 @@ async function poll_extra()
       const sessionByPid = {};
       const logBySession = {};
       (sessions || []).forEach(s => {
-        if (s.pid)     sessionByPid[s.pid] = s.session;
+        if (s.pid) sessionByPid[s.pid] = s.session;
         if (s.session) logBySession[s.session] = s.log;
       });
 
-      // 세션 생성 순서 맵 (sessions는 created 오름차순)
+      // 세션 생성 순서를 정렬 키로 사용 (sessions는 created 오름차순)
       const orderMap = {};
       (sessions || []).forEach((s, idx) => { orderMap[s.session] = idx; });
 
       const savedSess = localStorage.getItem('alpha_log_session') || '';
       const sessIds = [];
-      window._alphaProgCache = window._alphaProgCache || {};  // { simul_id: pct }
+
+
 
       const rows = (gprocs || [])
-        .sort((a, b) => {
-          const sa = sessionByPid[a.pid] || '';
-          const sb = sessionByPid[b.pid] || '';
-          // 1) 세션 생성 순 (세션 없는 항목은 맨 뒤)
-          const ia = (sa in orderMap) ? orderMap[sa] : Number.POSITIVE_INFINITY;
-          const ib = (sb in orderMap) ? orderMap[sb] : Number.POSITIVE_INFINITY;
-          if (ia !== ib) return ia - ib;
-          // 2) 세션명 알파벳 정렬
-          if (sa !== sb) return sa.localeCompare(sb, 'en');
-          // 3) 마지막으로 PID
-          return (a.pid || 0) - (b.pid || 0);
-        })
-        .map(p => {
-          const sess   = sessionByPid[p.pid] || '';
-          const vramGB = (p.vram_mb ? (p.vram_mb/1024).toFixed(2) : '0.00') + ' GB';
-
-          const link = sess
-            ? `<a href="#" class="log-select${savedSess===sess?' active':''}"
-                  data-session="${sess}" title="log: ${logBySession[sess] || ''}">${sess}</a>`
-            : '';
-
-          const btn = sess
-            ? `<button class="stop-btn sm" data-session="${sess}" title="Stop ${sess}">⏹  Stop</button>`
-            : '';
-
-          // ac-...-s7  =>  simul_id = 7
-          let sid = null;
-          const m = /-s(\d+)$/.exec(sess);
-          if (m) { sid = m[1]; sessIds.push(sid); }
-
-          // 표를 다시 그려도 값이 '—'로 돌아가지 않도록 캐시값으로 placeholder 채움
-          const lastPct = (sid && typeof window._alphaProgCache[sid] === 'number')
-            ? window._alphaProgCache[sid].toFixed(1) + '%'
-            : '—';
-          const progressCell = sid
-            ? `<span class="ppct" data-sid="${sid}">${lastPct}</span>`
-            : '—';
-
-          return { pid: p.pid, session: link, name: p.name, vram: vramGB, progress: progressCell, action: btn };
-        });
-
-      render_table(
-        document.getElementById('gpu_proc_table'),
-        rows,
-        [['pid','PID'], ['session','Session'], ['name','Name'], ['vram','VRAM'], ['progress','Progress'], ['action','']]
-      );
-
-      // 진행률: simul_id로 DB 조회 → 값이 "바뀐 경우에만" 셀 갱신
-      if (sessIds.length) {
-        const uniq = [...new Set(sessIds)];
-        try {
-          const map = await fetch_json('/api/simul/progress?ids=' + uniq.join(','));
-
-          // 기존
-          // const toPct = (x) => {
-          //   const n = Number(x);
-          //   if (!isFinite(n)) return null;
-          //   return (n <= 1.0001 ? n * 100 : n);
-          // };
-
-          // 교체: 0~100이면 이미 퍼센트로 간주, 0<n<=1은 비율로 간주하여 ×100
-          const toPct = (x) => {
-            const n = Number(x);
-            if (!isFinite(n)) return null;
-
-            // 0~100 구간은 퍼센트로 취급 (1.0 → 1.0%)
-            if (n >= 0 && n <= 100) return n;
-
-            // 0~1 구간(정확한 비율)은 퍼센트로 변환 (0.87 → 87%)
-            if (n > 0 && n <= 1.0000001) return n * 100;
-
-            // 그 외 값은 그대로 둠 (방어)
-            return n;
-          };
+      .sort((a, b) => {
+        const sa = sessionByPid[a.pid] || '';
+        const sb = sessionByPid[b.pid] || '';
+        // 1) 세션 생성 순 (세션 없는 항목은 맨 뒤)
+        const ia = (sa in orderMap) ? orderMap[sa] : Number.POSITIVE_INFINITY;
+        const ib = (sb in orderMap) ? orderMap[sb] : Number.POSITIVE_INFINITY;
+        if (ia !== ib) return ia - ib;
+        // 2) 세션명 알파벳 정렬 (동률 tie-breaker)
+        if (sa !== sb) return sa.localeCompare(sb, 'en');
+        // 3) 마지막으로 PID 오름차순
+        return (a.pid || 0) - (b.pid || 0);
+      })
+      .map(p => {
+        const sess = sessionByPid[p.pid] || '';
+        const vramGB = (p.vram_mb ? (p.vram_mb/1024).toFixed(2) : '0.00') + ' GB';
+        const link = sess
+          ? `<a href="#" class="log-select${savedSess===sess?' active':''}"
+                data-session="${sess}" title="log: ${logBySession[sess] || ''}">${sess}</a>`
+          : '';
+        const btn = sess
+          ? `<button class="stop-btn sm" data-session="${sess}" title="Stop ${sess}">⏹ Stop</button>`
+          : '';
+        return { pid: p.pid, session: link, name: p.name, vram: vramGB, action: btn };
+      });
 
 
-          let changed = false;
-          uniq.forEach(sid => {
-            const v = toPct(map?.[String(sid)]);
-            if (v == null) return;
+        render_table(
+          document.getElementById('gpu_proc_table'),
+          rows,
+          [['pid','PID'], ['session','Session'], ['name','Name'], ['vram','VRAM'], ['progress','Progress'], ['action','']]
+        );
 
-            const prev = window._alphaProgCache[sid];
-            const diffed = (prev == null) || (Math.abs(prev - v) >= 0.1); // 0.1% 이상 변동 시만
-            if (!diffed) return;
-
-            // 변화 0.1% 이상일 때만 갱신
-            window._alphaProgCache[sid] = v;
-            const txt = v.toFixed(1) + '%';
-            // 같은 simul_id를 가진 모든 셀 갱신 (id 대신 data-sid 사용)
-            document.querySelectorAll(`.ppct[data-sid="${sid}"]`).forEach(el => { el.textContent = txt; });
-            changed = true;
-
-            // 매번 갱신
-            //window._alphaProgCache[sid] = v;                // 캐시는 유지하되
-            //const txt = v.toFixed(1) + '%';                 // 매번 문자열 생성
-            //document.querySelectorAll(`.ppct[data-sid="${sid}"]`)
-              //.forEach(el => { el.textContent = txt; });    // 매 refresh마다 항상 갱신
-            // changed 플래그/조건부 리프레시는 더 이상 필요 없음
-
-          });
-
-          if (changed) {
-            // 필요 시 특정 패널만 추가 리프레시 (과잉 폴링 방지)
-            // await refresh_alpha_sessions?.();
+        if (sessIds.length) {
+          const uniq = [...new Set(sessIds)];
+          try {
+            const map = await fetch_json('/api/simul/progress?ids=' + uniq.join(','));
+            uniq.forEach(sid => {
+              const el = document.getElementById('ppct-' + sid);
+              if (!el) return;
+              const v = map?.[String(sid)];
+              if (typeof v === 'number') el.textContent = v.toFixed(1) + '%';
+            });
+          } catch (e) {
+            console.debug('progress fetch error', e);
           }
-        } catch (e) {
-          console.debug('progress fetch error', e);
         }
-      }
+
+
 
     } catch (e) {
       console.debug('gpu_processes/sessions error:', e);
